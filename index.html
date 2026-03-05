@@ -242,6 +242,7 @@ let friendsList = JSON.parse(localStorage.getItem('pong_friends') || '[]');
 let partyMembers = []; // names invited to party
 let friendDropdown = null; // { name, x, y } or null
 let openChats = []; // [{ name, messages: [{from,text}], input: '' }]
+let focusedChat = -1; // index into openChats, -1 = none
 function saveFriends() { localStorage.setItem('pong_friends', JSON.stringify(friendsList)); }
 function isFriend(name) { return friendsList.includes(name); }
 function toggleFriend(name) {
@@ -557,7 +558,19 @@ function handlePauseClick() {
     const cX = fpX2 + fpW2 + 12 + ci * (cW + 10), cY = H - cH - 20;
     // Close button
     if (mouseX >= cX + cW - 24 && mouseX <= cX + cW && mouseY >= cY && mouseY <= cY + 28) {
-      openChats.splice(ci, 1); beep(300, 0.06); return;
+      openChats.splice(ci, 1);
+      if (focusedChat === ci) focusedChat = -1;
+      else if (focusedChat > ci) focusedChat--;
+      beep(300, 0.06); return;
+    }
+    // Click input box to focus
+    const ciY = cY + cH - 32;
+    if (mouseX >= cX + 8 && mouseX <= cX + cW - 8 && mouseY >= ciY && mouseY <= ciY + 24) {
+      focusedChat = ci; beep(400, 0.05); return;
+    }
+    // Click anywhere on chat to focus it
+    if (mouseX >= cX && mouseX <= cX + cW && mouseY >= cY && mouseY <= cY + cH) {
+      focusedChat = ci; return;
     }
   }
 
@@ -815,6 +828,19 @@ window.addEventListener('keydown', e => {
     else if (e.key.length === 1 && playerName.length < 16) playerName += e.key.toUpperCase();
     e.preventDefault(); return;
   }
+  // Chat input handling
+  if (paused && focusedChat >= 0 && focusedChat < openChats.length) {
+    const chat = openChats[focusedChat];
+    if (e.key === 'Escape') { focusedChat = -1; e.preventDefault(); return; }
+    if (e.key === 'Enter' && chat.input.length > 0) {
+      chat.messages.push({ from: playerName || 'YOU', text: chat.input });
+      chat.input = ''; beep(500, 0.06);
+      e.preventDefault(); return;
+    }
+    if (e.key === 'Backspace') { chat.input = chat.input.slice(0, -1); e.preventDefault(); return; }
+    if (e.key.length === 1 && chat.input.length < 40) { chat.input += e.key; e.preventDefault(); return; }
+    e.preventDefault(); return;
+  }
   if (e.key === 'Escape' && started) {
     paused = !paused;
     document.body.style.cursor = paused ? '' : 'none';
@@ -966,9 +992,9 @@ function update(dt) {
       }
     } else {
       // Physics-based paddle movement — predict where ball will be at paddle height
-      const accel = 3500 + d.skill * 5000; // 3500 (worst) to 8500 (best)
-      const maxSpd = 1100 + d.skill * 1800;  // 1100 (worst) to 2900 (best)
-      const friction = 2.8 - d.skill * 0.6; // 2.8 (worst) to 2.2 (best)
+      const accel = 4500 + d.skill * 6000; // 4500 (worst) to 10500 (best)
+      const maxSpd = 1400 + d.skill * 2200;  // 1400 (worst) to 3600 (best)
+      const friction = 2.5 - d.skill * 0.4; // 2.5 (worst) to 2.1 (best)
       // Predict ball position at paddle height using full arc simulation
       let targX = b.x, targY = b.y;
       if (!b.held) {
@@ -1057,7 +1083,7 @@ function update(dt) {
       }
       // Hit check — ball near paddle height, descending, paddle underneath
       const hitDist = Math.hypot(b.x - d.x, b.y - d.y);
-      if (b.canHit && b.vz <= 0 && b.z >= PZ * 0.7 && hitDist < HAND_R * 1.4) {
+      if (b.canHit && b.vz <= 0 && b.z >= PZ * 0.65 && hitDist < HAND_R * 1.5) {
         b.canHit = false;
         b.hitThisArc = true;
         d.lives = 1; // reset lives on successful hit
@@ -2277,12 +2303,19 @@ function drawPaused() {
     }
     // Input box
     const ciY = cY + cH - 32;
-    X.fillStyle = 'rgba(255,255,255,0.04)';
-    X.strokeStyle = 'rgba(255,255,255,0.12)'; X.lineWidth = 1;
+    const isFocused = focusedChat === ci;
+    X.fillStyle = isFocused ? 'rgba(0,255,170,0.06)' : 'rgba(255,255,255,0.04)';
+    X.strokeStyle = isFocused ? '#0fa' : 'rgba(255,255,255,0.12)'; X.lineWidth = isFocused ? 1.5 : 1;
     X.beginPath(); X.roundRect(cX + 8, ciY, cW - 16, 24, 4); X.fill(); X.stroke();
     X.font = '400 9px Orbitron,sans-serif'; X.textAlign = 'left'; X.textBaseline = 'middle';
-    X.fillStyle = chat.input ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)';
-    X.fillText(chat.input || 'Type a message...', cX + 14, ciY + 12);
+    if (chat.input) {
+      X.fillStyle = 'rgba(255,255,255,0.8)';
+      const cursor = isFocused && Math.floor(Date.now() / 500) % 2 === 0 ? '|' : '';
+      X.fillText(chat.input + cursor, cX + 14, ciY + 12);
+    } else {
+      X.fillStyle = isFocused ? 'rgba(0,255,170,0.4)' : 'rgba(255,255,255,0.2)';
+      X.fillText(isFocused ? 'Type and press Enter...' : 'Click to type...', cX + 14, ciY + 12);
+    }
   }
 
   // Custom cursor
