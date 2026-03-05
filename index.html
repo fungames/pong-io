@@ -233,11 +233,31 @@ let ball, score, combo, started, gameOver, hitFlash, speedMult;
 let obstacles, dummies, particles, movers;
 let enteringName, playerName;
 let handTiltX = 0, handTiltY = 0;
-let paused = false, leaderboard = [], spectating = false;
+let paused = false, leaderboard = [], spectating = false, tabHeld = false;
 let frozenHandX = 0, frozenHandY = 0, gameOverTime = 0;
 const ROUND_DURATION = 5 * 60; // 5 minutes in seconds
 let roundTimer = 0, roundOver = false;
 let combatTexts = [], gDt = 0;
+let friendsList = JSON.parse(localStorage.getItem('pong_friends') || '[]');
+let partyMembers = []; // names invited to party
+let friendDropdown = null; // { name, x, y } or null
+let openChats = []; // [{ name, messages: [{from,text}], input: '' }]
+function saveFriends() { localStorage.setItem('pong_friends', JSON.stringify(friendsList)); }
+function isFriend(name) { return friendsList.includes(name); }
+function toggleFriend(name) {
+  if (isFriend(name)) friendsList = friendsList.filter(n => n !== name);
+  else friendsList.push(name);
+  saveFriends();
+}
+function inviteToParty(name) {
+  if (!partyMembers.includes(name)) partyMembers.push(name);
+}
+function openChatWith(name) {
+  if (!openChats.find(c => c.name === name)) {
+    openChats.push({ name, messages: [], input: '' });
+  }
+  friendDropdown = null;
+}
 
 // ── All-Player Stats ─────────────────────────────────────────
 let allStats = {}; // { NAME: { played, gold, silver, bronze, losses } }
@@ -382,7 +402,7 @@ function saveScore(name, sc) {
 
 function makeBall(wx, wy) {
   return { x: wx, y: wy, z: PZ, vx: 0, vy: 0, vz: 0, held: true, canHit: false, hitThisArc: true,
-    rotX: 0, rotY: 0, avx: 0, avy: 0 };
+    rotX: 0, rotY: 0, avx: 0, avy: 0, portalCd: 0 };
 }
 
 function init() {
@@ -403,7 +423,7 @@ function init() {
     obstacles.push({ x: rand(150, AW - 250), y: rand(150, AH - 250), w: rand(50, 130), h: rand(50, 130), ht: rand(50, 140) });
   const aiNames = ['ALEX','SAM','JORDAN','RILEY','CASEY','MORGAN','TAYLOR','QUINN','AVERY','JAMIE'];
   const aiCols = ['#ff6b6b','#69db7c','#ffd43b','#cc5de8','#ff922b','#66d9ef','#f06595','#a9e34b','#da77f2','#ffa8a8'];
-  const aiSkills = [0.6, 0.95, 0.35, 0.75, 0.45, 0.88, 0.3, 0.7, 0.5, 0.82];
+  const aiSkills = [0.82, 0.98, 0.75, 0.93, 0.78, 0.96, 0.7, 0.9, 0.8, 0.95];
   dummies = [];
   for (let i = 0; i < 10; i++) {
     const sx = rand(200, AW - 200), sy = rand(200, AH - 200);
@@ -411,12 +431,20 @@ function init() {
   }
   for (const d of dummies) { d.ball = makeBall(d.x, d.y); d.dead = false; d.lives = 1; d.vx = 0; d.vy = 0; d.hits = 0; }
   movers = [];
-  for (let i = 0; i < 20; i++) {
+  const PSZ = 180, PAD = 40;
+  function noOverlap(nx, ny) {
+    for (const m of movers) {
+      if (Math.abs(m.x - nx) < PSZ + PAD && Math.abs(m.y - ny) < PSZ + PAD) return false;
+    }
+    return true;
+  }
+  for (let i = 0; i < 8; i++) {
+    let px, py, tries = 0;
+    do { px = rand(100, AW - PSZ - 100); py = rand(100, AH - PSZ - 100); tries++; }
+    while (!noOverlap(px, py) && tries < 50);
     const d = Math.random() < 0.5 ? 'h' : 'v';
-    movers.push({
-      x: rand(100, AW - 200), y: rand(100, AH - 200), dir: d,
-      speed: rand(150, 350) * (Math.random() < 0.5 ? 1 : -1), sz: 120
-    });
+    movers.push({ x: px, y: py, dir: d,
+      speed: rand(150, 350) * (Math.random() < 0.5 ? 1 : -1), sz: PSZ });
   }
 }
 
@@ -506,6 +534,68 @@ function floodFill(grid, sx, sy, newCol) {
   }
 }
 function handlePauseClick() {
+  // Friend dropdown menu clicks
+  if (friendDropdown) {
+    const ddW = 100, ddH = 60;
+    const ddX = Math.min(friendDropdown.x, W - ddW - 10);
+    const ddY = friendDropdown.y;
+    if (mouseX >= ddX && mouseX <= ddX + ddW && mouseY >= ddY && mouseY <= ddY + ddH) {
+      if (mouseY >= ddY + 4 && mouseY <= ddY + 28) {
+        openChatWith(friendDropdown.name); beep(500, 0.08); return;
+      }
+      if (mouseY >= ddY + 32 && mouseY <= ddY + 56) {
+        toggleFriend(friendDropdown.name); friendDropdown = null; beep(300, 0.08); return;
+      }
+    }
+    friendDropdown = null; return;
+  }
+
+  // Chat dialog clicks (close button, input focus)
+  for (let ci = 0; ci < openChats.length; ci++) {
+    const cW = 240, cH = 200;
+    const fpW2 = 280, fpX2 = 20;
+    const cX = fpX2 + fpW2 + 12 + ci * (cW + 10), cY = H - cH - 20;
+    // Close button
+    if (mouseX >= cX + cW - 24 && mouseX <= cX + cW && mouseY >= cY && mouseY <= cY + 28) {
+      openChats.splice(ci, 1); beep(300, 0.06); return;
+    }
+  }
+
+  // Friends panel clicks
+  const fpW = 280, fpX = 20, fpH = 300, fpY = H - fpH - 20;
+  const invBtnY = fpY + 44;
+  // Copy invite link
+  if (mouseX >= fpX + 14 && mouseX <= fpX + fpW - 14 && mouseY >= invBtnY && mouseY <= invBtnY + 26) {
+    if (navigator.clipboard) navigator.clipboard.writeText(window.location.href + '?invite=' + (playerName || 'player'));
+    beep(800, 0.1); return;
+  }
+  // Friends list — name click (dropdown) and invite button
+  const partyY = invBtnY + 36;
+  const friendsY = partyY + 34 + Math.max(0, partyMembers.length - 1) * 18;
+  for (let i = 0; i < Math.min(friendsList.length, 6); i++) {
+    const fy = friendsY + 36 + i * 24;
+    // Invite button
+    if (mouseX >= fpX + fpW - 74 && mouseX <= fpX + fpW - 20 && mouseY >= fy - 8 && mouseY <= fy + 8) {
+      inviteToParty(friendsList[i]); beep(600, 0.08); return;
+    }
+    // Name click — open dropdown
+    if (mouseX >= fpX + 14 && mouseX <= fpX + fpW - 80 && mouseY >= fy - 10 && mouseY <= fy + 10) {
+      friendDropdown = { name: friendsList[i], x: mouseX, y: mouseY }; beep(400, 0.06); return;
+    }
+  }
+
+  // Friend button clicks on leaderboard
+  const lbPanelW = 280, lbPx = W - lbPanelW - 20, lbPy = 20;
+  const lb = getLiveLeaderboard();
+  for (let i = 0; i < 10; i++) {
+    const entry = lb[i];
+    if (!entry || entry.isPlayer) continue;
+    const rowY = lbPy + 74 + i * 24;
+    const fbx = lbPx + lbPanelW - 100, fby = rowY - 8, fbw = 80, fbh = 16;
+    if (mouseX >= fbx && mouseX <= fbx + fbw && mouseY >= fby && mouseY <= fby + fbh) {
+      toggleFriend(entry.name); beep(600, 0.08); return;
+    }
+  }
   const g = pauseGridLayout();
   // Ball color row
   for (let i = 0; i < BALL_COLORS.length; i++) {
@@ -609,8 +699,7 @@ function handlePauseClick() {
       }
     }
     // Save slots
-    const maxSlots = paidAccount ? 10 : 3;
-    for (let i = 0; i < maxSlots; i++) {
+    for (let i = 0; i < 1; i++) {
       const sx = g.edGx + i * (g.slotW + g.slotGap), sy = g.slotY;
       // X button to delete (top-right corner of slot)
       if (pixelArtSlots[i] && mouseX >= sx + g.slotW - 12 && mouseX <= sx + g.slotW && mouseY >= sy && mouseY <= sy + 12) {
@@ -694,8 +783,8 @@ C.addEventListener('mousemove', e => {
 });
 C.addEventListener('click', () => {
   if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
-  if (roundOver) { init(); return; }
   if (paused) { handlePauseClick(); return; }
+  if (roundOver) { init(); return; }
   if (gameOver) { gameOver = false; spectating = false; started = false; init(); return; }
   if (spectating) { spectating = false; started = false; init(); return; }
   if (!started) {
@@ -726,13 +815,20 @@ window.addEventListener('keydown', e => {
     else if (e.key.length === 1 && playerName.length < 16) playerName += e.key.toUpperCase();
     e.preventDefault(); return;
   }
-  if ((e.key === 'Escape' || e.key === 'Control') && started && !gameOver) {
+  if (e.key === 'Escape' && started) {
     paused = !paused;
     document.body.style.cursor = paused ? '' : 'none';
     if (paused) loadLeaderboard();
     e.preventDefault(); return;
   }
+  if (e.key === 'Tab' && started) {
+    tabHeld = true;
+    e.preventDefault(); return;
+  }
   if (e.code.startsWith('Arrow')) e.preventDefault();
+});
+window.addEventListener('keyup', e => {
+  if (e.key === 'Tab') { tabHeld = false; e.preventDefault(); }
 });
 
 // ── 3D Projection (with slight CCW rotation) ────────────────
@@ -829,12 +925,12 @@ function update(dt) {
   for (const m of movers) {
     if (m.dir === 'h') {
       m.x += m.speed * dt;
-      if (m.x < 0) { m.x = 0; m.speed = Math.abs(m.speed); }
-      if (m.x > AW - m.sz) { m.x = AW - m.sz; m.speed = -Math.abs(m.speed); }
+      if (m.x < 50) { m.x = 50; m.speed = Math.abs(m.speed); }
+      if (m.x > AW - m.sz - 50) { m.x = AW - m.sz - 50; m.speed = -Math.abs(m.speed); }
     } else {
       m.y += m.speed * dt;
-      if (m.y < 0) { m.y = 0; m.speed = Math.abs(m.speed); }
-      if (m.y > AH - m.sz) { m.y = AH - m.sz; m.speed = -Math.abs(m.speed); }
+      if (m.y < 50) { m.y = 50; m.speed = Math.abs(m.speed); }
+      if (m.y > AH - m.sz - 50) { m.y = AH - m.sz - 50; m.speed = -Math.abs(m.speed); }
     }
   }
 
@@ -852,7 +948,7 @@ function update(dt) {
   }
 
   // Update dummy movement + balls regardless of game state
-  const MZ = PZ / 2;
+  const MZ = PZ * 0.25;
   for (const d of dummies) {
     if (d.dead) continue; // Frozen — skip all updates
     const b = d.ball;
@@ -869,16 +965,36 @@ function update(dt) {
         b.avx = rand(-3, 3); b.avy = rand(-3, 3);
       }
     } else {
-      // Physics-based paddle movement — accelerate toward ball's actual position
-      const accel = 1400 + d.skill * 3200; // 1400 (worst) to 4600 (best)
-      const maxSpd = 550 + d.skill * 1100;  // 550 (worst) to 1650 (best)
-      const friction = 4 - d.skill * 1.5; // 4 (worst) to 2.5 (best)
-      const targX = b.x;
-      const targY = b.y;
-      // Subtle jitter — simulate human hand shakiness
+      // Physics-based paddle movement — predict where ball will be at paddle height
+      const accel = 3500 + d.skill * 5000; // 3500 (worst) to 8500 (best)
+      const maxSpd = 1100 + d.skill * 1800;  // 1100 (worst) to 2900 (best)
+      const friction = 2.8 - d.skill * 0.6; // 2.8 (worst) to 2.2 (best)
+      // Predict ball position at paddle height using full arc simulation
+      let targX = b.x, targY = b.y;
+      if (!b.held) {
+        let sz = b.z, svz = b.vz;
+        let tPredict = 0;
+        // Simulate forward to find when ball reaches PZ height while descending
+        for (let step = 0; step < 120; step++) {
+          const sDt = 0.016;
+          svz += GRAV * sDt;
+          sz -= svz * sDt;
+          tPredict += sDt;
+          if (svz < 0 && sz >= PZ * 0.8) break; // descending near paddle height
+          if (sz <= 0) { // bounced — reverse
+            sz = 0; svz = -BOUNCE_VZ;
+          }
+        }
+        const predict = tPredict * (0.7 + d.skill * 0.3);
+        targX = b.x + b.vx * predict;
+        targY = b.y + b.vy * predict;
+        targX = clamp(targX, BALL_R, AW - BALL_R);
+        targY = clamp(targY, BALL_R, AH - BALL_R);
+      }
+      // Minimal jitter
       d.jitterT = (d.jitterT || 0) + dt;
-      const jx = Math.sin(d.jitterT * 5 + d.skill * 5) * 4;
-      const jy = Math.cos(d.jitterT * 4 + d.skill * 3) * 4;
+      const jx = Math.sin(d.jitterT * 5 + d.skill * 5) * 2;
+      const jy = Math.cos(d.jitterT * 4 + d.skill * 3) * 2;
       const dx = targX + jx - d.x, dy = targY + jy - d.y;
       const dist = Math.hypot(dx, dy);
       if (dist > 1) {
@@ -910,7 +1026,8 @@ function update(dt) {
         b.canHit = true;
       }
       // Portal collision for AI balls — teleport to random exit portal
-      if (b.vz > 0 && b.z <= MZ && b.z > MZ - 60) {
+      b.portalCd = Math.max(0, (b.portalCd || 0) - dt);
+      if (b.portalCd <= 0 && b.vz > 0 && b.z <= MZ && b.z > MZ - 60) {
         for (let mi = 0; mi < movers.length; mi++) {
           const m = movers[mi];
           if (b.x > m.x && b.x < m.x + m.sz && b.y > m.y && b.y < m.y + m.sz) {
@@ -921,6 +1038,17 @@ function update(dt) {
             b.y = exit.y + exit.sz / 2;
             b.z = MZ + 1;
             b.vz = -Math.abs(b.vz);
+            b.portalCd = 1.5;
+            // AI reacts to portal — boost toward ball's new position
+            const pdx = b.x - d.x, pdy = b.y - d.y;
+            const pdist = Math.hypot(pdx, pdy);
+            if (pdist > 1) {
+              const boost = maxSpd * (0.6 + d.skill * 0.4);
+              d.vx = (pdx / pdist) * boost;
+              d.vy = (pdy / pdist) * boost;
+            }
+            b.x = clamp(b.x, BALL_R, AW - BALL_R);
+            b.y = clamp(b.y, BALL_R, AH - BALL_R);
             spawnP(b.x, b.y, '#f0f', 8);
             beep(1200, 0.1, 'sine', 0.04);
             break;
@@ -929,7 +1057,7 @@ function update(dt) {
       }
       // Hit check — ball near paddle height, descending, paddle underneath
       const hitDist = Math.hypot(b.x - d.x, b.y - d.y);
-      if (b.canHit && b.vz <= 0 && b.z >= PZ * 0.8 && hitDist < HAND_R * 1.1) {
+      if (b.canHit && b.vz <= 0 && b.z >= PZ * 0.7 && hitDist < HAND_R * 1.4) {
         b.canHit = false;
         b.hitThisArc = true;
         d.lives = 1; // reset lives on successful hit
@@ -955,7 +1083,8 @@ function update(dt) {
   }
 
   // Portal collision — teleport ball to random exit portal
-  if (ball.vz > 0 && ball.z <= MZ && ball.z > MZ - 60) {
+  ball.portalCd = Math.max(0, (ball.portalCd || 0) - dt);
+  if (ball.portalCd <= 0 && ball.vz > 0 && ball.z <= MZ && ball.z > MZ - 60) {
     for (let mi = 0; mi < movers.length; mi++) {
       const m = movers[mi];
       if (ball.x > m.x && ball.x < m.x + m.sz && ball.y > m.y && ball.y < m.y + m.sz) {
@@ -966,6 +1095,9 @@ function update(dt) {
         ball.y = exit.y + exit.sz / 2;
         ball.z = MZ + 1;
         ball.vz = -Math.abs(ball.vz);
+        ball.portalCd = 1.5;
+        ball.x = clamp(ball.x, BALL_R, AW - BALL_R);
+        ball.y = clamp(ball.y, BALL_R, AH - BALL_R);
         spawnP(ball.x, ball.y, '#f0f', 12);
         beep(1200, 0.15, 'sine', 0.06);
         break;
@@ -1050,7 +1182,7 @@ function render() {
   if (gameOver) drawFrozenHand();
   drawParticlesR(); drawWalls(); drawDebugLines();
   if (!spectating) drawHUD();
-  if (started) drawLeaderboard();
+  if (started && tabHeld) drawLeaderboard();
   if (hitFlash > 0) { X.fillStyle = `rgba(255,255,255,${hitFlash * 0.08})`; X.fillRect(0, 0, W, H); }
   if (!started) drawStart();
   if (spectating) {
@@ -1068,9 +1200,9 @@ function render() {
     drawStats();
   }
   if (started) drawRoundTimer();
-  if (paused) drawPaused();
   if (gameOver) drawGameOver();
   if (roundOver) drawRoundEnd();
+  if (paused) drawPaused();
   drawCombatTexts(gDt);
   // Server number
   X.font = '400 10px Orbitron,sans-serif'; X.textAlign = 'right'; X.textBaseline = 'bottom';
@@ -1186,7 +1318,7 @@ function drawBall() {
 }
 
 function drawMovers() {
-  const MZ = PZ / 2;
+  const MZ = PZ * 0.25;
   for (const m of movers) {
     const cx = m.x + m.sz / 2, cy = m.y + m.sz / 2;
     const [p0x, p0y] = proj(m.x, m.y, MZ);
@@ -1406,18 +1538,25 @@ function drawDummies() {
     X.textBaseline = 'bottom';
     X.fillStyle = d.dead ? 'rgba(255,100,100,0.3)' : `rgba(${cr},${cg},${cb},0.4)`;
     X.fillText(d.name, cx, cy - sz / 2 - 4 * SC);
+    if (d.dead) {
+      X.font = `900 ${Math.max(10, SC * 8)}px Orbitron,sans-serif`;
+      X.fillStyle = 'rgba(255,70,70,0.85)';
+      X.textBaseline = 'top'; X.textAlign = 'center';
+      X.fillText('ELIMINATED', cx, cy + sz / 2 + 4 * SC);
+    }
 
   }
 }
 
 function spawnCombatText(name, col) {
-  combatTexts.push({ text: `${name} ELIMINATED`, col, y: 0, life: 3 });
+  const offset = combatTexts.length * 28;
+  combatTexts.push({ text: `${name} ELIMINATED`, col, y: -offset, life: 3.5 });
 }
 
 function drawCombatTexts(dt) {
   for (let i = combatTexts.length - 1; i >= 0; i--) {
     const ct = combatTexts[i];
-    ct.y += 40 * dt;
+    ct.y += 60 * dt;
     ct.life -= dt;
     if (ct.life <= 0) { combatTexts.splice(i, 1); continue; }
     const alpha = Math.min(1, ct.life);
@@ -1572,13 +1711,27 @@ function drawLeaderboard() {
     X.fillText(`${i + 1}`, px + 16, rowY);
     if (entry) {
       X.save();
-      X.beginPath(); X.rect(px + 38, rowY - 12, panelW - 100, 22); X.clip();
+      X.beginPath(); X.rect(px + 38, rowY - 12, panelW - 80, 22); X.clip();
       X.fillText(entry.name, px + 42, rowY);
-      X.restore();
       if (entry.dead) {
+        const nameW = X.measureText(entry.name).width;
+        X.font = '700 10px sans-serif';
+        X.fillText('❌', px + 42 + nameW + 4, rowY);
+      }
+      X.restore();
+      // Add friend button (not for self)
+      if (!entry.isPlayer) {
+        const added = isFriend(entry.name);
+        const label = added ? 'Added' : 'Add Friend';
         X.font = '700 8px Orbitron,sans-serif';
-        X.fillStyle = 'rgba(255,100,100,0.6)';
-        X.fillText('OUT', px + panelW - 52, rowY);
+        const btnW = X.measureText(label).width + 12;
+        const fbx = px + panelW - 58 - btnW / 2, fby = rowY - 8, fbh = 16;
+        X.fillStyle = added ? 'rgba(0,255,170,0.12)' : 'rgba(255,255,255,0.05)';
+        X.strokeStyle = added ? '#0fa' : 'rgba(255,255,255,0.2)'; X.lineWidth = 1;
+        X.beginPath(); X.roundRect(fbx, fby, btnW, fbh, 3); X.fill(); X.stroke();
+        X.textAlign = 'center'; X.textBaseline = 'middle';
+        X.fillStyle = added ? '#0fa' : 'rgba(255,255,255,0.45)';
+        X.fillText(label, fbx + btnW / 2, fby + fbh / 2);
       }
       X.font = '700 12px Orbitron,sans-serif';
       X.textAlign = 'right'; X.fillStyle = col;
@@ -1596,41 +1749,41 @@ function drawStats() {
   const entries = Object.keys(allStats).map(n => ({ name: n, ...allStats[n] }));
   entries.sort((a, b) => b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || b.played - a.played);
   const maxRows = Math.min(entries.length, 11);
-  const rowH = 16, headerH = 42;
-  const panelW = 320, panelH = headerH + maxRows * rowH + 14;
+  const rowH = 24, headerH = 52;
+  const panelW = 380, panelH = headerH + maxRows * rowH + 18;
   const px = W - panelW - 20, py = 350;
-  X.fillStyle = 'rgba(10,10,30,0.7)';
+  X.fillStyle = 'rgba(10,10,30,0.75)';
   X.strokeStyle = 'rgba(0,255,170,0.3)'; X.lineWidth = 1;
   X.beginPath(); X.roundRect(px, py, panelW, panelH, 8); X.fill(); X.stroke();
-  X.textAlign = 'center'; X.font = '700 12px Orbitron,sans-serif'; X.fillStyle = '#0fa';
-  X.fillText('STATS', px + panelW / 2, py + 18);
+  X.textAlign = 'center'; X.font = '700 16px Orbitron,sans-serif'; X.fillStyle = '#0fa';
+  X.fillText('STATS', px + panelW / 2, py + 22);
   // Column headers
   const cols = [
-    { label: 'PLAYER', x: px + 14, align: 'left', w: 90 },
-    { label: 'GP', x: px + 120, align: 'center', w: 30 },
-    { label: 'G', x: px + 158, align: 'center', w: 24, col: '#ffd700' },
-    { label: 'S', x: px + 190, align: 'center', w: 24, col: '#c0c0c0' },
-    { label: 'B', x: px + 222, align: 'center', w: 24, col: '#cd7f32' },
-    { label: 'L', x: px + 254, align: 'center', w: 24, col: 'rgba(255,100,100,0.6)' },
+    { label: 'PLAYER', x: px + 16, align: 'left', w: 110 },
+    { label: 'GP', x: px + 150, align: 'center', w: 36 },
+    { label: 'G', x: px + 198, align: 'center', w: 30, col: '#ffd700' },
+    { label: 'S', x: px + 238, align: 'center', w: 30, col: '#c0c0c0' },
+    { label: 'B', x: px + 278, align: 'center', w: 30, col: '#cd7f32' },
+    { label: 'L', x: px + 318, align: 'center', w: 30, col: 'rgba(255,100,100,0.6)' },
   ];
-  X.font = '700 8px Orbitron,sans-serif'; X.textBaseline = 'middle';
+  X.font = '700 11px Orbitron,sans-serif'; X.textBaseline = 'middle';
   for (const c of cols) {
     X.textAlign = c.align; X.fillStyle = c.col || 'rgba(255,255,255,0.4)';
-    X.fillText(c.label, c.x, py + 34);
+    X.fillText(c.label, c.x, py + 42);
   }
   // Divider
-  X.strokeStyle = 'rgba(255,255,255,0.08)'; X.lineWidth = 1;
+  X.strokeStyle = 'rgba(255,255,255,0.1)'; X.lineWidth = 1;
   X.beginPath(); X.moveTo(px + 10, py + headerH); X.lineTo(px + panelW - 10, py + headerH); X.stroke();
   // Rows
   for (let i = 0; i < maxRows; i++) {
     const e = entries[i];
-    const ry = py + headerH + 6 + i * rowH;
+    const ry = py + headerH + 10 + i * rowH;
     const isPlayer = playerName && e.name === playerName;
     if (isPlayer) {
-      X.fillStyle = 'rgba(0,255,170,0.06)';
-      X.fillRect(px + 4, ry - 7, panelW - 8, rowH);
+      X.fillStyle = 'rgba(0,255,170,0.08)';
+      X.fillRect(px + 4, ry - 9, panelW - 8, rowH);
     }
-    X.font = '700 9px Orbitron,sans-serif'; X.textBaseline = 'middle';
+    X.font = '700 12px Orbitron,sans-serif'; X.textBaseline = 'middle';
     X.textAlign = 'left'; X.fillStyle = isPlayer ? '#0fa' : 'rgba(255,255,255,0.55)';
     X.fillText(e.name.length > 10 ? e.name.slice(0, 9) + '..' : e.name, cols[0].x, ry);
     const vals = [e.played, e.gold, e.silver, e.bronze, e.losses];
@@ -1640,8 +1793,8 @@ function drawStats() {
     }
   }
   if (entries.length === 0) {
-    X.font = '400 9px Orbitron,sans-serif'; X.textAlign = 'center'; X.fillStyle = 'rgba(255,255,255,0.2)';
-    X.fillText('NO STATS YET — FINISH A ROUND', px + panelW / 2, py + headerH + 16);
+    X.font = '400 12px Orbitron,sans-serif'; X.textAlign = 'center'; X.fillStyle = 'rgba(255,255,255,0.2)';
+    X.fillText('NO STATS YET — FINISH A ROUND', px + panelW / 2, py + headerH + 20);
   }
 }
 
@@ -1741,7 +1894,7 @@ function drawGameOver() {
 }
 
 function drawPaused() {
-  X.fillStyle = 'rgba(4,4,12,0.82)'; X.fillRect(0, 0, W, H);
+  X.fillStyle = 'rgba(4,4,12,1)'; X.fillRect(0, 0, W, H);
 
   // PAUSED title centered
   X.textAlign = 'center'; X.textBaseline = 'middle';
@@ -1897,12 +2050,11 @@ function drawPaused() {
     X.fillText('UPLOAD: 16x16px RECOMMENDED — ANY IMAGE AUTO-SCALES', g.edGx, g.actRowY + 27);
 
     // ── Save Slots ───────────────────────────────────────────
-    const maxSlots = paidAccount ? 10 : 3;
     X.font = '400 7px Orbitron,sans-serif'; X.textAlign = 'left'; X.textBaseline = 'bottom';
     X.fillStyle = 'rgba(255,255,255,0.35)';
-    X.fillText(selectedSlot >= 0 ? `SLOT #${selectedSlot+1} SELECTED` : 'SLOTS', g.edGx, g.slotY - 3);
+    X.fillText(selectedSlot >= 0 ? 'SLOT SELECTED' : 'SLOT', g.edGx, g.slotY - 3);
 
-    for (let i = 0; i < maxSlots; i++) {
+    for (let i = 0; i < 1; i++) {
       const sx = g.edGx + i * (g.slotW + g.slotGap), sy = g.slotY;
       const hasData = !!pixelArtSlots[i];
       const isSel = selectedSlot === i;
@@ -1924,13 +2076,6 @@ function drawPaused() {
         X.fillStyle = isSel ? '#ffb400' : 'rgba(255,255,255,0.25)';
         X.fillText(`${i+1}`, sx + g.slotW / 2, sy + g.slotH / 2);
       }
-    }
-    if (!paidAccount) {
-      const upY = g.slotY + g.slotH + 6;
-      X.fillStyle = 'rgba(255,210,0,0.06)'; X.strokeStyle = 'rgba(255,210,0,0.25)'; X.lineWidth = 1;
-      X.beginPath(); X.roundRect(g.edGx, upY, 140, 22, 4); X.fill(); X.stroke();
-      X.font = '700 7px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
-      X.fillStyle = '#ffd700'; X.fillText('UPGRADE $5 — 10 SLOTS', g.edGx + 70, upY + 11);
     }
 
     // ── Right column: Palette ────────────────────────────────
@@ -2000,6 +2145,144 @@ function drawPaused() {
       X.font = '400 6px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
       X.fillStyle = 'rgba(255,100,100,0.6)'; X.fillText('CLEAR', g.swX + 30, clearSwY + 8);
     }
+  }
+
+  // ── Friends & Party Panel (bottom-left) ────────────────────
+  const fpW = 280, fpH = 300;
+  const fpX = 20, fpY = H - fpH - 20;
+  X.fillStyle = 'rgba(10,10,30,0.8)';
+  X.strokeStyle = 'rgba(0,255,170,0.3)'; X.lineWidth = 1;
+  X.beginPath(); X.roundRect(fpX, fpY, fpW, fpH, 8); X.fill(); X.stroke();
+
+  // Header
+  X.textAlign = 'center'; X.textBaseline = 'middle';
+  X.font = '700 14px Orbitron,sans-serif'; X.fillStyle = '#0fa';
+  X.fillText('FRIENDS & PARTY', fpX + fpW / 2, fpY + 20);
+
+  X.strokeStyle = 'rgba(255,255,255,0.08)'; X.lineWidth = 1;
+  X.beginPath(); X.moveTo(fpX + 10, fpY + 36); X.lineTo(fpX + fpW - 10, fpY + 36); X.stroke();
+
+  // Invite link button
+  const invBtnY = fpY + 44;
+  X.fillStyle = 'rgba(0,255,170,0.08)';
+  X.strokeStyle = 'rgba(0,255,170,0.3)'; X.lineWidth = 1;
+  X.beginPath(); X.roundRect(fpX + 14, invBtnY, fpW - 28, 26, 4); X.fill(); X.stroke();
+  X.font = '700 10px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
+  X.fillStyle = '#0fa';
+  X.fillText('COPY INVITE LINK', fpX + fpW / 2, invBtnY + 13);
+
+  // Party section
+  const partyY = invBtnY + 36;
+  X.font = '700 10px Orbitron,sans-serif'; X.textAlign = 'left'; X.fillStyle = 'rgba(255,255,255,0.4)';
+  X.fillText('PARTY', fpX + 14, partyY);
+  if (partyMembers.length === 0) {
+    X.font = '400 9px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.15)';
+    X.fillText('Invite friends to start a party', fpX + 14, partyY + 18);
+  } else {
+    for (let i = 0; i < partyMembers.length; i++) {
+      X.font = '400 10px Orbitron,sans-serif'; X.fillStyle = '#0fa';
+      X.fillText(partyMembers[i], fpX + 24, partyY + 18 + i * 18);
+      X.font = '400 8px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.2)';
+      X.fillText('(invited)', fpX + 24 + X.measureText(partyMembers[i]).width + 6, partyY + 18 + i * 18);
+    }
+  }
+
+  // Divider
+  const friendsY = partyY + 34 + Math.max(0, partyMembers.length - 1) * 18;
+  X.strokeStyle = 'rgba(255,255,255,0.06)'; X.lineWidth = 1;
+  X.beginPath(); X.moveTo(fpX + 10, friendsY); X.lineTo(fpX + fpW - 10, friendsY); X.stroke();
+
+  // Friends list
+  X.font = '700 10px Orbitron,sans-serif'; X.textAlign = 'left'; X.fillStyle = 'rgba(255,255,255,0.4)';
+  X.fillText('FRIENDS', fpX + 14, friendsY + 16);
+  X.font = '400 11px Orbitron,sans-serif'; X.textBaseline = 'middle';
+  if (friendsList.length === 0) {
+    X.fillStyle = 'rgba(255,255,255,0.15)';
+    X.fillText('No friends added yet', fpX + 20, friendsY + 38);
+    X.font = '400 9px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.1)';
+    X.fillText('Click "Add Friend" on leaderboard', fpX + 20, friendsY + 54);
+  } else {
+    for (let i = 0; i < Math.min(friendsList.length, 6); i++) {
+      const fy = friendsY + 36 + i * 24;
+      // Online dot
+      X.beginPath(); X.arc(fpX + 20, fy, 4, 0, Math.PI * 2);
+      const inGame = dummies.some(d => d.name === friendsList[i]);
+      X.fillStyle = inGame ? '#0f0' : 'rgba(255,255,255,0.2)'; X.fill();
+      // Name (clickable)
+      X.fillStyle = inGame ? '#0fa' : 'rgba(255,255,255,0.4)';
+      X.font = '400 11px Orbitron,sans-serif'; X.textAlign = 'left';
+      X.fillText(friendsList[i], fpX + 32, fy);
+      // Invite button
+      const inParty = partyMembers.includes(friendsList[i]);
+      const invLabel = inParty ? 'INVITED' : 'INVITE';
+      X.font = '700 7px Orbitron,sans-serif';
+      X.fillStyle = inParty ? 'rgba(0,255,170,0.15)' : 'rgba(0,255,170,0.08)';
+      X.strokeStyle = inParty ? '#0fa' : 'rgba(0,255,170,0.25)'; X.lineWidth = 1;
+      X.beginPath(); X.roundRect(fpX + fpW - 74, fy - 8, 54, 16, 3); X.fill(); X.stroke();
+      X.textAlign = 'center'; X.fillStyle = inParty ? '#0fa' : 'rgba(0,255,170,0.5)';
+      X.fillText(invLabel, fpX + fpW - 47, fy);
+    }
+  }
+
+  // Friend dropdown menu
+  if (friendDropdown) {
+    const ddW = 100, ddH = 60;
+    const ddX = Math.min(friendDropdown.x, W - ddW - 10);
+    const ddY = friendDropdown.y;
+    X.fillStyle = 'rgba(15,15,35,0.95)';
+    X.strokeStyle = 'rgba(0,255,170,0.4)'; X.lineWidth = 1;
+    X.beginPath(); X.roundRect(ddX, ddY, ddW, ddH, 5); X.fill(); X.stroke();
+    // Chat option
+    X.fillStyle = mouseY >= ddY + 4 && mouseY <= ddY + 28 ? 'rgba(0,255,170,0.1)' : 'transparent';
+    X.fillRect(ddX + 2, ddY + 4, ddW - 4, 24);
+    X.font = '700 10px Orbitron,sans-serif'; X.textAlign = 'left'; X.textBaseline = 'middle';
+    X.fillStyle = '#0fa'; X.fillText('Chat', ddX + 12, ddY + 16);
+    // Remove friend option
+    X.fillStyle = mouseY >= ddY + 32 && mouseY <= ddY + 56 ? 'rgba(255,80,80,0.1)' : 'transparent';
+    X.fillRect(ddX + 2, ddY + 32, ddW - 4, 24);
+    X.fillStyle = 'rgba(255,100,100,0.7)'; X.fillText('Remove', ddX + 12, ddY + 44);
+  }
+
+  // Open chat dialogs
+  for (let ci = 0; ci < openChats.length; ci++) {
+    const chat = openChats[ci];
+    const cW = 240, cH = 200;
+    const cX = fpX + fpW + 12 + ci * (cW + 10), cY = H - cH - 20;
+    // Panel
+    X.fillStyle = 'rgba(10,10,30,0.9)';
+    X.strokeStyle = 'rgba(0,255,170,0.3)'; X.lineWidth = 1;
+    X.beginPath(); X.roundRect(cX, cY, cW, cH, 8); X.fill(); X.stroke();
+    // Header
+    X.fillStyle = 'rgba(0,255,170,0.08)'; X.fillRect(cX + 1, cY + 1, cW - 2, 28);
+    X.font = '700 11px Orbitron,sans-serif'; X.textAlign = 'left'; X.textBaseline = 'middle';
+    X.fillStyle = '#0fa'; X.fillText(chat.name, cX + 12, cY + 15);
+    // Close X
+    X.font = '700 12px Orbitron,sans-serif'; X.textAlign = 'center';
+    X.fillStyle = 'rgba(255,100,100,0.6)'; X.fillText('x', cX + cW - 14, cY + 15);
+    // Messages area
+    if (chat.messages.length === 0) {
+      X.font = '400 9px Orbitron,sans-serif'; X.textAlign = 'center';
+      X.fillStyle = 'rgba(255,255,255,0.12)';
+      X.fillText('No messages yet', cX + cW / 2, cY + 100);
+    } else {
+      for (let mi = Math.max(0, chat.messages.length - 6); mi < chat.messages.length; mi++) {
+        const msg = chat.messages[mi];
+        const my = cY + 40 + (mi - Math.max(0, chat.messages.length - 6)) * 18;
+        X.font = '700 8px Orbitron,sans-serif'; X.textAlign = 'left';
+        X.fillStyle = msg.from === playerName ? '#0fa' : 'rgba(255,255,255,0.5)';
+        X.fillText(msg.from + ':', cX + 10, my);
+        X.font = '400 9px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.6)';
+        X.fillText(msg.text, cX + 10 + X.measureText(msg.from + ': ').width, my);
+      }
+    }
+    // Input box
+    const ciY = cY + cH - 32;
+    X.fillStyle = 'rgba(255,255,255,0.04)';
+    X.strokeStyle = 'rgba(255,255,255,0.12)'; X.lineWidth = 1;
+    X.beginPath(); X.roundRect(cX + 8, ciY, cW - 16, 24, 4); X.fill(); X.stroke();
+    X.font = '400 9px Orbitron,sans-serif'; X.textAlign = 'left'; X.textBaseline = 'middle';
+    X.fillStyle = chat.input ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)';
+    X.fillText(chat.input || 'Type a message...', cX + 14, ciY + 12);
   }
 
   // Custom cursor
