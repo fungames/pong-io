@@ -1,0 +1,2030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PongArena.net</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Audiowide&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{overflow:hidden;height:100%;background:#111;cursor:none}
+  canvas{display:block}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const C = document.getElementById('c'), X = C.getContext('2d');
+
+// ── Constants ────────────────────────────────────────────────
+const AW = 2400, AH = 1800;
+const PZ = 200;
+const BALL_R = 14;
+const HAND_R = 48;
+const GRAV = 420;
+const HIT_VZ = 340;
+const HIT_XY = 310;
+const TILT = 0.58;
+const ZSCL = 0.52;
+const BOUNCE_VZ = Math.sqrt(2 * GRAV * PZ) * 1.25;
+const VIEW_ROT = -0.09;           // ~5 degrees CCW
+const COS_R = Math.cos(VIEW_ROT);
+const SIN_R = Math.sin(VIEW_ROT);
+
+// ── Face textures (9 ball skins) ─────────────────────────────
+const FTEX_SZ = 128;
+const FACE_NAMES = ['HUMAN','ROBOT','CAT','ALIEN','SKULL','SMILEY','ANGRY','COOL','CYCLOPS'];
+const faceTextures = [];
+let selectedFace = 0, selectedPaddle = 0;
+let selectedBallColor = 0;
+const PADDLE_STYLES = [
+  { name:'NEON',  top:'#00e676', bot:'#00a54a', glow:'rgba(0,255,170,0.5)' },
+  { name:'FIRE',  top:'#ff5533', bot:'#cc2200', glow:'rgba(255,80,50,0.5)' },
+  { name:'ICE',   top:'#55aaff', bot:'#2266cc', glow:'rgba(80,160,255,0.5)' },
+  { name:'VOID',  top:'#bb55ee', bot:'#7722aa', glow:'rgba(180,80,230,0.5)' },
+  { name:'GOLD',  top:'#ffd700', bot:'#cc9900', glow:'rgba(255,210,0,0.5)' },
+  { name:'ROSE',  top:'#ff66aa', bot:'#cc2266', glow:'rgba(255,100,170,0.5)' },
+  { name:'EMBER', top:'#ff8833', bot:'#cc5500', glow:'rgba(255,130,50,0.5)' },
+  { name:'SNOW',  top:'#e8f0ff', bot:'#99aacc', glow:'rgba(200,220,255,0.5)' },
+  { name:'VOLT',  top:'#00ffff', bot:'#00aaaa', glow:'rgba(0,255,255,0.5)' },
+];
+const BALL_COLORS = [
+  { name:'PEARL', stops:['#f8f8f8','#e4e0dc','#b0aaa0','#706860'] },
+  { name:'RUBY',  stops:['#ffa0a0','#e06060','#a03030','#602020'] },
+  { name:'OCEAN', stops:['#a0d0ff','#6090e0','#3060a0','#203860'] },
+  { name:'JADE',  stops:['#a0f0c0','#60c080','#309050','#205830'] },
+  { name:'GOLD',  stops:['#fff0a0','#e0c040','#a08020','#605010'] },
+  { name:'VIOLET',stops:['#d0a0ff','#9060e0','#6030a0','#402060'] },
+];
+(function buildAllFaces() {
+  const s = FTEX_SZ, h = s / 2;
+  function mk() { const c = document.createElement('canvas'); c.width = c.height = s; return c; }
+  function base(f, c0, c1, c2) {
+    const g = f.createRadialGradient(h, h * 1.05, 0, h, h, h);
+    g.addColorStop(0, c0); g.addColorStop(0.85, c1); g.addColorStop(1, c2);
+    f.beginPath(); f.arc(h, h, h * 0.92, 0, Math.PI * 2); f.fillStyle = g; f.fill();
+  }
+  // 0 — HUMAN
+  { const cv = mk(), f = cv.getContext('2d');
+    base(f, '#f2c396', '#dfa872', '#c08050');
+    f.fillStyle = '#3a2518';
+    f.beginPath(); f.ellipse(h, s * 0.14, h * 0.82, s * 0.22, 0, 0, Math.PI, true); f.fill();
+    f.beginPath(); f.ellipse(h, s * 0.08, h * 0.68, s * 0.15, 0, Math.PI, Math.PI * 2, true); f.fill();
+    f.fillStyle = '#e0a878';
+    f.beginPath(); f.ellipse(s * 0.1, h, s * 0.07, s * 0.1, 0, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.ellipse(s * 0.9, h, s * 0.07, s * 0.1, 0, 0, Math.PI * 2); f.fill();
+    const ey = s * 0.42, esp = s * 0.16;
+    f.fillStyle = '#fff';
+    f.beginPath(); f.ellipse(h - esp, ey, s * 0.085, s * 0.055, 0, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.ellipse(h + esp, ey, s * 0.085, s * 0.055, 0, 0, Math.PI * 2); f.fill();
+    f.fillStyle = '#4a6848';
+    f.beginPath(); f.arc(h - esp, ey, s * 0.035, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.arc(h + esp, ey, s * 0.035, 0, Math.PI * 2); f.fill();
+    f.fillStyle = '#111';
+    f.beginPath(); f.arc(h - esp, ey, s * 0.018, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.arc(h + esp, ey, s * 0.018, 0, Math.PI * 2); f.fill();
+    f.fillStyle = 'rgba(255,255,255,0.7)';
+    f.beginPath(); f.arc(h - esp + s * 0.012, ey - s * 0.015, s * 0.01, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.arc(h + esp + s * 0.012, ey - s * 0.015, s * 0.01, 0, Math.PI * 2); f.fill();
+    f.strokeStyle = '#3a2515'; f.lineWidth = s * 0.022; f.lineCap = 'round';
+    f.beginPath(); f.arc(h - esp, ey - s * 0.07, s * 0.07, Math.PI * 1.15, Math.PI * 1.85); f.stroke();
+    f.beginPath(); f.arc(h + esp, ey - s * 0.07, s * 0.07, Math.PI * 1.15, Math.PI * 1.85); f.stroke();
+    f.strokeStyle = '#c49060'; f.lineWidth = s * 0.015;
+    f.beginPath(); f.moveTo(h, ey + s * 0.04); f.quadraticCurveTo(h + s * 0.035, ey + s * 0.14, h, ey + s * 0.15); f.stroke();
+    f.fillStyle = '#c46050';
+    f.beginPath(); f.ellipse(h, ey + s * 0.26, s * 0.08, s * 0.03, 0, 0, Math.PI); f.fill();
+    f.strokeStyle = '#a04838'; f.lineWidth = s * 0.012;
+    f.beginPath(); f.arc(h, ey + s * 0.23, s * 0.07, 0.15 * Math.PI, 0.85 * Math.PI); f.stroke();
+    faceTextures.push(cv);
+  }
+  // 1 — ROBOT
+  { const cv = mk(), f = cv.getContext('2d');
+    base(f, '#c0c8d0', '#8090a0', '#506070');
+    f.fillStyle = '#607080';
+    f.beginPath(); f.arc(s * 0.18, s * 0.45, s * 0.025, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.arc(s * 0.82, s * 0.45, s * 0.025, 0, Math.PI * 2); f.fill();
+    const ey = s * 0.38, esp = s * 0.15, esz = s * 0.11;
+    f.fillStyle = '#112'; f.fillRect(h - esp - esz / 2, ey - esz / 2, esz, esz); f.fillRect(h + esp - esz / 2, ey - esz / 2, esz, esz);
+    f.fillStyle = '#0f8'; f.fillRect(h - esp - esz / 2 + 2, ey - esz / 2 + 2, esz - 4, esz - 4); f.fillRect(h + esp - esz / 2 + 2, ey - esz / 2 + 2, esz - 4, esz - 4);
+    f.strokeStyle = '#8090a0'; f.lineWidth = s * 0.02;
+    f.beginPath(); f.moveTo(h, s * 0.08); f.lineTo(h, s * 0.2); f.stroke();
+    f.fillStyle = '#f33'; f.beginPath(); f.arc(h, s * 0.07, s * 0.028, 0, Math.PI * 2); f.fill();
+    f.strokeStyle = '#0f8'; f.lineWidth = s * 0.012;
+    for (let i = 0; i < 3; i++) { const my = s * 0.58 + i * s * 0.045; f.beginPath(); f.moveTo(h - s * 0.12, my); f.lineTo(h + s * 0.12, my); f.stroke(); }
+    faceTextures.push(cv);
+  }
+  // 2 — CAT
+  { const cv = mk(), f = cv.getContext('2d');
+    base(f, '#f4b875', '#d89050', '#a06830');
+    f.fillStyle = '#d89050';
+    f.beginPath(); f.moveTo(s * 0.22, s * 0.15); f.lineTo(s * 0.12, s * 0.35); f.lineTo(s * 0.35, s * 0.28); f.fill();
+    f.beginPath(); f.moveTo(s * 0.78, s * 0.15); f.lineTo(s * 0.88, s * 0.35); f.lineTo(s * 0.65, s * 0.28); f.fill();
+    f.fillStyle = '#f4a0a0';
+    f.beginPath(); f.moveTo(s * 0.23, s * 0.2); f.lineTo(s * 0.17, s * 0.32); f.lineTo(s * 0.32, s * 0.28); f.fill();
+    f.beginPath(); f.moveTo(s * 0.77, s * 0.2); f.lineTo(s * 0.83, s * 0.32); f.lineTo(s * 0.68, s * 0.28); f.fill();
+    const ey = s * 0.42, esp = s * 0.14;
+    f.fillStyle = '#ffe'; f.beginPath(); f.ellipse(h - esp, ey, s * 0.08, s * 0.06, 0, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.ellipse(h + esp, ey, s * 0.08, s * 0.06, 0, 0, Math.PI * 2); f.fill();
+    f.fillStyle = '#1a1a00'; f.beginPath(); f.ellipse(h - esp, ey, s * 0.015, s * 0.045, 0, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.ellipse(h + esp, ey, s * 0.015, s * 0.045, 0, 0, Math.PI * 2); f.fill();
+    f.fillStyle = '#f07080'; f.beginPath(); f.moveTo(h, s * 0.52); f.lineTo(h - s * 0.03, s * 0.56); f.lineTo(h + s * 0.03, s * 0.56); f.fill();
+    f.strokeStyle = '#fff'; f.lineWidth = s * 0.008;
+    for (const side of [-1, 1]) for (const dy of [-0.02, 0.02, 0.06]) { f.beginPath(); f.moveTo(h + side * s * 0.08, s * (0.56 + dy)); f.lineTo(h + side * s * 0.38, s * (0.52 + dy)); f.stroke(); }
+    f.strokeStyle = '#a06030'; f.lineWidth = s * 0.012;
+    f.beginPath(); f.moveTo(h - s * 0.06, s * 0.6); f.quadraticCurveTo(h, s * 0.66, h + s * 0.06, s * 0.6); f.stroke();
+    faceTextures.push(cv);
+  }
+  // 3 — ALIEN
+  { const cv = mk(), f = cv.getContext('2d');
+    base(f, '#a0e8a0', '#60b060', '#308030');
+    const ey = s * 0.42, esp = s * 0.16;
+    f.fillStyle = '#112';
+    f.beginPath(); f.ellipse(h - esp, ey, s * 0.11, s * 0.13, -0.15, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.ellipse(h + esp, ey, s * 0.11, s * 0.13, 0.15, 0, Math.PI * 2); f.fill();
+    f.fillStyle = 'rgba(255,255,255,0.25)';
+    f.beginPath(); f.ellipse(h - esp - s * 0.02, ey - s * 0.04, s * 0.035, s * 0.05, -0.3, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.ellipse(h + esp - s * 0.02, ey - s * 0.04, s * 0.035, s * 0.05, -0.3, 0, Math.PI * 2); f.fill();
+    f.fillStyle = '#308030';
+    f.beginPath(); f.arc(h - s * 0.02, s * 0.58, s * 0.012, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.arc(h + s * 0.02, s * 0.58, s * 0.012, 0, Math.PI * 2); f.fill();
+    faceTextures.push(cv);
+  }
+  // 4 — SKULL
+  { const cv = mk(), f = cv.getContext('2d');
+    base(f, '#f0ece0', '#d8d0c0', '#a09880');
+    const ey = s * 0.4, esp = s * 0.14;
+    f.fillStyle = '#1a1510';
+    f.beginPath(); f.ellipse(h - esp, ey, s * 0.08, s * 0.09, 0, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.ellipse(h + esp, ey, s * 0.08, s * 0.09, 0, 0, Math.PI * 2); f.fill();
+    f.fillStyle = 'rgba(200,50,20,0.4)';
+    f.beginPath(); f.arc(h - esp, ey + s * 0.01, s * 0.03, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.arc(h + esp, ey + s * 0.01, s * 0.03, 0, Math.PI * 2); f.fill();
+    f.fillStyle = '#1a1510'; f.beginPath(); f.moveTo(h, s * 0.52); f.lineTo(h - s * 0.03, s * 0.58); f.lineTo(h + s * 0.03, s * 0.58); f.fill();
+    f.fillStyle = '#f0ece0'; f.strokeStyle = '#1a1510'; f.lineWidth = s * 0.01;
+    for (let i = 0; i < 6; i++) { const tx = h - s * 0.12 + i * s * 0.048; f.fillRect(tx, s * 0.62, s * 0.04, s * 0.06); f.strokeRect(tx, s * 0.62, s * 0.04, s * 0.06); }
+    faceTextures.push(cv);
+  }
+  // 5 — SMILEY
+  { const cv = mk(), f = cv.getContext('2d');
+    base(f, '#ffe040', '#f0c020', '#c89810');
+    const ey = s * 0.38, esp = s * 0.15;
+    f.fillStyle = '#222'; f.beginPath(); f.arc(h - esp, ey, s * 0.04, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.arc(h + esp, ey, s * 0.04, 0, Math.PI * 2); f.fill();
+    f.strokeStyle = '#222'; f.lineWidth = s * 0.025; f.lineCap = 'round';
+    f.beginPath(); f.arc(h, s * 0.46, s * 0.22, 0.15 * Math.PI, 0.85 * Math.PI); f.stroke();
+    f.fillStyle = 'rgba(255,120,80,0.25)';
+    f.beginPath(); f.arc(h - s * 0.25, s * 0.52, s * 0.06, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.arc(h + s * 0.25, s * 0.52, s * 0.06, 0, Math.PI * 2); f.fill();
+    faceTextures.push(cv);
+  }
+  // 6 — ANGRY
+  { const cv = mk(), f = cv.getContext('2d');
+    base(f, '#ff6050', '#d04030', '#901818');
+    const ey = s * 0.42, esp = s * 0.15;
+    f.fillStyle = '#fff'; f.beginPath(); f.ellipse(h - esp, ey, s * 0.075, s * 0.05, 0, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.ellipse(h + esp, ey, s * 0.075, s * 0.05, 0, 0, Math.PI * 2); f.fill();
+    f.fillStyle = '#600'; f.beginPath(); f.arc(h - esp, ey, s * 0.03, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.arc(h + esp, ey, s * 0.03, 0, Math.PI * 2); f.fill();
+    f.strokeStyle = '#400'; f.lineWidth = s * 0.03; f.lineCap = 'round';
+    f.beginPath(); f.moveTo(h - esp - s * 0.06, ey - s * 0.06); f.lineTo(h - esp + s * 0.06, ey - s * 0.1); f.stroke();
+    f.beginPath(); f.moveTo(h + esp + s * 0.06, ey - s * 0.06); f.lineTo(h + esp - s * 0.06, ey - s * 0.1); f.stroke();
+    f.strokeStyle = '#400'; f.lineWidth = s * 0.02;
+    f.beginPath(); f.arc(h, s * 0.7, s * 0.15, Math.PI * 1.2, Math.PI * 1.8); f.stroke();
+    faceTextures.push(cv);
+  }
+  // 7 — COOL
+  { const cv = mk(), f = cv.getContext('2d');
+    base(f, '#70b0ff', '#4080d0', '#205098');
+    const ey = s * 0.4, esp = s * 0.15;
+    f.fillStyle = '#111';
+    f.beginPath(); f.roundRect(h - esp - s * 0.09, ey - s * 0.04, s * 0.18, s * 0.09, s * 0.02); f.fill();
+    f.beginPath(); f.roundRect(h + esp - s * 0.09, ey - s * 0.04, s * 0.18, s * 0.09, s * 0.02); f.fill();
+    f.strokeStyle = '#111'; f.lineWidth = s * 0.02;
+    f.beginPath(); f.moveTo(h - esp + s * 0.09, ey); f.lineTo(h + esp - s * 0.09, ey); f.stroke();
+    f.beginPath(); f.moveTo(h - esp - s * 0.09, ey); f.lineTo(s * 0.1, ey - s * 0.02); f.stroke();
+    f.beginPath(); f.moveTo(h + esp + s * 0.09, ey); f.lineTo(s * 0.9, ey - s * 0.02); f.stroke();
+    f.fillStyle = 'rgba(255,255,255,0.15)';
+    f.beginPath(); f.ellipse(h - esp - s * 0.02, ey - s * 0.01, s * 0.04, s * 0.02, -0.2, 0, Math.PI * 2); f.fill();
+    f.beginPath(); f.ellipse(h + esp - s * 0.02, ey - s * 0.01, s * 0.04, s * 0.02, -0.2, 0, Math.PI * 2); f.fill();
+    f.strokeStyle = '#205098'; f.lineWidth = s * 0.015; f.lineCap = 'round';
+    f.beginPath(); f.moveTo(h - s * 0.06, s * 0.6); f.quadraticCurveTo(h + s * 0.05, s * 0.62, h + s * 0.1, s * 0.56); f.stroke();
+    faceTextures.push(cv);
+  }
+  // 8 — CYCLOPS
+  { const cv = mk(), f = cv.getContext('2d');
+    base(f, '#c89df0', '#9060c0', '#603888');
+    const ey = s * 0.4;
+    f.fillStyle = '#fff'; f.beginPath(); f.ellipse(h, ey, s * 0.14, s * 0.12, 0, 0, Math.PI * 2); f.fill();
+    f.fillStyle = '#603888'; f.beginPath(); f.arc(h, ey, s * 0.07, 0, Math.PI * 2); f.fill();
+    f.fillStyle = '#111'; f.beginPath(); f.arc(h, ey, s * 0.035, 0, Math.PI * 2); f.fill();
+    f.fillStyle = 'rgba(255,255,255,0.6)'; f.beginPath(); f.arc(h + s * 0.02, ey - s * 0.03, s * 0.015, 0, Math.PI * 2); f.fill();
+    f.strokeStyle = '#4a2868'; f.lineWidth = s * 0.025; f.lineCap = 'round';
+    f.beginPath(); f.arc(h, ey - s * 0.08, s * 0.12, Math.PI * 1.15, Math.PI * 1.85); f.stroke();
+    f.fillStyle = '#4a2060'; f.beginPath(); f.ellipse(h, s * 0.62, s * 0.05, s * 0.06, 0, 0, Math.PI * 2); f.fill();
+    f.fillStyle = '#2a1040'; f.beginPath(); f.ellipse(h, s * 0.62, s * 0.035, s * 0.04, 0, 0, Math.PI * 2); f.fill();
+    faceTextures.push(cv);
+  }
+})();
+
+// ── State ────────────────────────────────────────────────────
+let W, H, SC;
+let camX, camY, handX, handY, handVX, handVY, prevHX, prevHY, mouseX, mouseY;
+let ball, score, combo, started, gameOver, hitFlash, speedMult;
+let obstacles, dummies, particles, movers;
+let enteringName, playerName;
+let handTiltX = 0, handTiltY = 0;
+let paused = false, leaderboard = [], spectating = false;
+let frozenHandX = 0, frozenHandY = 0, gameOverTime = 0;
+const ROUND_DURATION = 5 * 60; // 5 minutes in seconds
+let roundTimer = 0, roundOver = false;
+let combatTexts = [], gDt = 0;
+
+// ── All-Player Stats ─────────────────────────────────────────
+let allStats = {}; // { NAME: { played, gold, silver, bronze, losses } }
+function emptyStat() { return { played: 0, gold: 0, silver: 0, bronze: 0, losses: 0 }; }
+function loadStats() {
+  try { allStats = JSON.parse(localStorage.getItem('pong_all_stats') || '{}'); } catch { allStats = {}; }
+}
+function saveStats() { localStorage.setItem('pong_all_stats', JSON.stringify(allStats)); }
+function recordRoundResult() {
+  const lb = getLiveLeaderboard();
+  for (let i = 0; i < lb.length; i++) {
+    const name = lb[i].name;
+    if (!allStats[name]) allStats[name] = emptyStat();
+    allStats[name].played++;
+    if (i === 0) allStats[name].gold++;
+    else if (i === 1) allStats[name].silver++;
+    else if (i === 2) allStats[name].bronze++;
+    else allStats[name].losses++;
+  }
+  saveStats();
+}
+loadStats();
+
+// ── Paddle Pixel Art Customizer ──────────────────────────────
+const PIX_GRID = 16; // 16x16 grid
+let pixelArt = null; // null = use preset style, or a 16x16 array of hex colors
+let pixelArtSlots = []; // saved designs [{name, data}]
+let paidAccount = false;
+let pauseTab = 'style'; // 'style' or 'editor'
+let editorColor = '#00ff88';
+let editorTool = 'pen'; // 'pen', 'eraser', 'fill'
+let editorDrawing = false;
+const EDITOR_PALETTE = [
+  '#000000','#ffffff','#ff0000','#00ff00','#0000ff','#ffff00',
+  '#ff00ff','#00ffff','#ff8800','#8800ff','#00ff88','#ff0088',
+  '#884400','#888888','#444444','#cccccc',
+  '#ff6666','#66ff66','#6666ff','#ffcc00','#cc00ff','#00ccff',
+  '#ff4444','#44ff44','#4444ff','#ffaa00',
+];
+let editorGrid = null; // 16x16 array — null until editor opened
+let selectedSlot = -1; // which save slot is targeted (-1 = none)
+// Color chooser state
+let pickerH = 0, pickerS = 1, pickerL = 0.5; // HSL values
+let customSwatches = []; // user-built swatch array of hex strings
+let pickerDragging = null; // null, 'hs', or 'l'
+function hslToHex(h, s, l) {
+  const a = s * Math.min(l, 1 - l);
+  const f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1); };
+  const toHex = v => Math.round(v * 255).toString(16).padStart(2, '0');
+  return '#' + toHex(f(0)) + toHex(f(8)) + toHex(f(4));
+}
+function loadCustomSwatches() {
+  try { customSwatches = JSON.parse(localStorage.getItem('pong_swatches') || '[]'); } catch { customSwatches = []; }
+}
+function saveCustomSwatches() { localStorage.setItem('pong_swatches', JSON.stringify(customSwatches)); }
+loadCustomSwatches();
+function newEmptyGrid() {
+  const g = [];
+  for (let y = 0; y < PIX_GRID; y++) { g[y] = []; for (let x = 0; x < PIX_GRID; x++) g[y][x] = null; }
+  return g;
+}
+function makeThumb(grid) {
+  const c = document.createElement('canvas'); c.width = PIX_GRID; c.height = PIX_GRID;
+  const t = c.getContext('2d');
+  for (let y = 0; y < PIX_GRID; y++) for (let x = 0; x < PIX_GRID; x++) {
+    if (grid[y][x]) { t.fillStyle = grid[y][x]; t.fillRect(x, y, 1, 1); }
+  }
+  return c;
+}
+function loadPixelArtSlots() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('pong_pixel_slots') || '[]');
+    pixelArtSlots = raw.map(s => s ? { data: s.data, thumb: makeThumb(s.data) } : null);
+  } catch { pixelArtSlots = []; }
+  try { paidAccount = JSON.parse(localStorage.getItem('pong_paid') || 'false'); } catch { paidAccount = false; }
+  try { const d = localStorage.getItem('pong_pixel_active'); if (d) { pixelArt = JSON.parse(d); bakePixelArt(pixelArt); } } catch { pixelArt = null; }
+}
+function savePixelArtSlots() {
+  const raw = pixelArtSlots.map(s => s ? { data: s.data } : null);
+  localStorage.setItem('pong_pixel_slots', JSON.stringify(raw));
+  localStorage.setItem('pong_pixel_active', JSON.stringify(pixelArt));
+}
+loadPixelArtSlots();
+// Hidden file input for image upload
+const fileInput = document.createElement('input');
+fileInput.type = 'file'; fileInput.accept = 'image/*'; fileInput.style.display = 'none';
+document.body.appendChild(fileInput);
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0]; if (!file) return;
+  const img = new Image();
+  img.onload = () => {
+    const tc = document.createElement('canvas'); tc.width = PIX_GRID; tc.height = PIX_GRID;
+    const tx = tc.getContext('2d');
+    tx.imageSmoothingEnabled = false;
+    tx.drawImage(img, 0, 0, PIX_GRID, PIX_GRID);
+    const id = tx.getImageData(0, 0, PIX_GRID, PIX_GRID);
+    if (!editorGrid) editorGrid = newEmptyGrid();
+    for (let y = 0; y < PIX_GRID; y++) for (let x = 0; x < PIX_GRID; x++) {
+      const i = (y * PIX_GRID + x) * 4;
+      const a = id.data[i + 3];
+      if (a < 30) { editorGrid[y][x] = null; continue; }
+      editorGrid[y][x] = '#' + ((1 << 24) + (id.data[i] << 16) + (id.data[i+1] << 8) + id.data[i+2]).toString(16).slice(1);
+    }
+    // Auto-save to selected slot if one is chosen
+    if (selectedSlot >= 0) {
+      const data = editorGrid.map(r => [...r]);
+      pixelArtSlots[selectedSlot] = { data, thumb: makeThumb(data) };
+      pixelArt = data.map(r => [...r]);
+      bakePixelArt(pixelArt); savePixelArtSlots();
+    }
+    URL.revokeObjectURL(img.src);
+    beep(800, 0.15);
+  };
+  img.src = URL.createObjectURL(file);
+  fileInput.value = '';
+});
+// Render pixel art to an offscreen canvas for fast in-game drawing
+let pixelArtCanvas = null;
+function bakePixelArt(grid) {
+  if (!grid) { pixelArtCanvas = null; return; }
+  pixelArtCanvas = document.createElement('canvas');
+  pixelArtCanvas.width = PIX_GRID; pixelArtCanvas.height = PIX_GRID;
+  const px = pixelArtCanvas.getContext('2d');
+  for (let y = 0; y < PIX_GRID; y++) for (let x = 0; x < PIX_GRID; x++) {
+    if (grid[y][x]) { px.fillStyle = grid[y][x]; px.fillRect(x, y, 1, 1); }
+  }
+}
+
+function loadLeaderboard() {
+  try { leaderboard = JSON.parse(localStorage.getItem('pong_io_lb') || '[]'); }
+  catch { leaderboard = []; }
+  leaderboard.sort((a, b) => b.score - a.score);
+  return leaderboard;
+}
+function saveScore(name, sc) {
+  loadLeaderboard();
+  leaderboard.push({ name, score: sc });
+  leaderboard.sort((a, b) => b.score - a.score);
+  leaderboard = leaderboard.slice(0, 10);
+  localStorage.setItem('pong_io_lb', JSON.stringify(leaderboard));
+}
+
+function makeBall(wx, wy) {
+  return { x: wx, y: wy, z: PZ, vx: 0, vy: 0, vz: 0, held: true, canHit: false, hitThisArc: true,
+    rotX: 0, rotY: 0, avx: 0, avy: 0 };
+}
+
+function init() {
+  camX = AW / 2; camY = AH / 2;
+  handX = AW / 2; handY = AH / 2;
+  prevHX = handX; prevHY = handY;
+  mouseX = W / 2; mouseY = H / 2;
+  handVX = handVY = 0;
+  handTiltX = handTiltY = 0;
+  score = 0; combo = 0; speedMult = 1;
+  started = false; gameOver = false; hitFlash = 0; paused = false; spectating = false;
+  roundTimer = 0; roundOver = false;
+  enteringName = !playerName; // ask for name only if not set yet
+  particles = [];
+  ball = makeBall(AW / 2, AH / 2);
+  obstacles = [];
+  for (let i = 0; i < 14; i++)
+    obstacles.push({ x: rand(150, AW - 250), y: rand(150, AH - 250), w: rand(50, 130), h: rand(50, 130), ht: rand(50, 140) });
+  const aiNames = ['ALEX','SAM','JORDAN','RILEY','CASEY','MORGAN','TAYLOR','QUINN','AVERY','JAMIE'];
+  const aiCols = ['#ff6b6b','#69db7c','#ffd43b','#cc5de8','#ff922b','#66d9ef','#f06595','#a9e34b','#da77f2','#ffa8a8'];
+  const aiSkills = [0.6, 0.95, 0.35, 0.75, 0.45, 0.88, 0.3, 0.7, 0.5, 0.82];
+  dummies = [];
+  for (let i = 0; i < 10; i++) {
+    const sx = rand(200, AW - 200), sy = rand(200, AH - 200);
+    dummies.push({ name: aiNames[i], hits: 0, x: sx, y: sy, tx: sx, ty: sy, col: aiCols[i], t: 0, dropT: rand(0.3, 1.2), skill: aiSkills[i], vx: 0, vy: 0 });
+  }
+  for (const d of dummies) { d.ball = makeBall(d.x, d.y); d.dead = false; d.lives = 1; d.vx = 0; d.vy = 0; d.hits = 0; }
+  movers = [];
+  for (let i = 0; i < 20; i++) {
+    const d = Math.random() < 0.5 ? 'h' : 'v';
+    movers.push({
+      x: rand(100, AW - 200), y: rand(100, AH - 200), dir: d,
+      speed: rand(150, 350) * (Math.random() < 0.5 ? 1 : -1), sz: 120
+    });
+  }
+}
+
+function rand(a, b) { return a + Math.random() * (b - a) }
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v }
+function hexRgba(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})` }
+
+// ── Audio ────────────────────────────────────────────────────
+let actx = null;
+function beep(freq, dur, type = 'sine', vol = 0.06) {
+  if (!actx) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
+  o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+}
+
+// ── Pause screen click handling ──────────────────────────────
+function pauseGridLayout() {
+  const bpx = 20, bpy = 20;
+  // Ball color row
+  const bcSz = 30, bcGap = 6;
+  const bcW = BALL_COLORS.length * (bcSz + bcGap) - bcGap;
+  const ballPanelW = bcW + 40, ballPanelH = 80;
+  const bcOX = bpx + (ballPanelW - bcW) / 2, bcOY = bpy + 38;
+  // Paddle preset panel — right of ball editor
+  const cellSz = 56, gap = 8, cols = 3;
+  const gridW = cellSz * cols + gap * (cols - 1);
+  const paddlePanelW = gridW + 36, paddlePanelH = 240;
+  const ppx = bpx + ballPanelW + 16, ppy = 20;
+  const pgox = ppx + (paddlePanelW - gridW) / 2, pgoy = ppy + 44;
+  // Tab buttons (above everything, at the paddle panel's top)
+  const tabW = 80, tabH = 24;
+  const tabY = bpy;
+  const tab1X = ppx, tab2X = ppx + tabW + 6;
+  // ── Editor layout (single contained panel) ──────────────
+  const edPx = ppx, edPy = tabY + tabH + 8;
+  const edCellSz = 14; // smaller cells so everything fits
+  const edGridSz = edCellSz * PIX_GRID; // 224px
+  const edGx = edPx + 10, edGy = edPy + 28; // grid top-left
+  // Below grid: tool row, action row, save slots
+  const toolRowY = edGy + edGridSz + 8;
+  const actRowY = toolRowY + 26;
+  const slotY = actRowY + 30, slotW = 38, slotH = 38, slotGap = 4;
+  // Right of grid: palette, color picker, swatches
+  const palCols = 5, palSz = 14, palGap = 2;
+  const palX = edGx + edGridSz + 10, palY = edGy;
+  const palRows = Math.ceil(EDITOR_PALETTE.length / palCols);
+  const palEndY = palY + palRows * (palSz + palGap);
+  // Color picker
+  const cpW = (palCols * (palSz + palGap) - palGap), cpH = 70;
+  const cpX = palX, cpY = palEndY + 4;
+  const cpSlW = 12, cpSlH = cpH;
+  const cpSlX = cpX + cpW + 4, cpSlY = cpY;
+  // Color preview + add swatch
+  const cpPrevY = cpY + cpH + 4, cpPrevSz = 18;
+  // Custom swatches
+  const swCols2 = palCols, swSz = 12, swGap = 2;
+  const swX = palX, swY = cpPrevY + cpPrevSz + 6;
+  // Panel size — compute to fit everything
+  const rightW = (cpW + 4 + cpSlW + 10);
+  const edPanelW = 10 + edGridSz + 10 + rightW + 6;
+  const bottomY = Math.max(slotY + slotH + 30, swY + 60);
+  const edPanelH = bottomY - edPy + 10;
+  return { bpx, bpy, ballPanelW, ballPanelH,
+    bcSz, bcGap, bcOX, bcOY,
+    cellSz, gap, paddlePanelW, paddlePanelH, ppx, ppy, pgox, pgoy,
+    tabW, tabH, tabY, tab1X, tab2X,
+    edPx, edPy, edCellSz, edGridSz, edPanelW, edPanelH, edGx, edGy,
+    toolRowY, actRowY,
+    palCols, palSz, palGap, palX, palY, palEndY,
+    cpW, cpH, cpX, cpY, cpSlW, cpSlH, cpSlX, cpSlY, cpPrevY, cpPrevSz,
+    swCols2, swSz, swGap, swX, swY,
+    slotY, slotW, slotH, slotGap };
+}
+function floodFill(grid, sx, sy, newCol) {
+  const old = grid[sy][sx];
+  if (old === newCol) return;
+  const stack = [[sx, sy]];
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    if (x < 0 || x >= PIX_GRID || y < 0 || y >= PIX_GRID) continue;
+    if (grid[y][x] !== old) continue;
+    grid[y][x] = newCol;
+    stack.push([x-1,y],[x+1,y],[x,y-1],[x,y+1]);
+  }
+}
+function handlePauseClick() {
+  const g = pauseGridLayout();
+  // Ball color row
+  for (let i = 0; i < BALL_COLORS.length; i++) {
+    const cx = g.bcOX + i * (g.bcSz + g.bcGap) + g.bcSz / 2;
+    const cy = g.bcOY + g.bcSz / 2;
+    if (Math.hypot(mouseX - cx, mouseY - cy) <= g.bcSz / 2) {
+      selectedBallColor = i; beep(500 + i * 50, 0.1); return;
+    }
+  }
+  // Tab buttons
+  if (mouseY >= g.tabY && mouseY <= g.tabY + g.tabH) {
+    if (mouseX >= g.tab1X && mouseX <= g.tab1X + g.tabW) { pauseTab = 'style'; beep(400, 0.08); return; }
+    if (mouseX >= g.tab2X && mouseX <= g.tab2X + g.tabW) {
+      pauseTab = 'editor';
+      if (!editorGrid) editorGrid = pixelArt ? pixelArt.map(r => [...r]) : newEmptyGrid();
+      beep(400, 0.08); return;
+    }
+  }
+  if (pauseTab === 'style') {
+    // Paddle preset grid
+    const presetStartY = g.tabY + g.tabH + 38;
+    for (let i = 0; i < 9; i++) {
+      const col = i % 3, row = Math.floor(i / 3);
+      const px = g.pgox + col * (g.cellSz + g.gap), py = presetStartY + row * (g.cellSz + g.gap);
+      if (mouseX >= px && mouseX <= px + g.cellSz && mouseY >= py && mouseY <= py + g.cellSz) {
+        selectedPaddle = i; pixelArt = null; bakePixelArt(null); savePixelArtSlots();
+        beep(600 + i * 60, 0.1); return;
+      }
+    }
+  } else {
+    // ── Editor interactions ──────────────────────────────────
+    // Grid click
+    const gx = Math.floor((mouseX - g.edGx) / g.edCellSz);
+    const gy = Math.floor((mouseY - g.edGy) / g.edCellSz);
+    if (gx >= 0 && gx < PIX_GRID && gy >= 0 && gy < PIX_GRID && editorGrid) {
+      if (editorTool === 'pen') editorGrid[gy][gx] = editorColor;
+      else if (editorTool === 'eraser') editorGrid[gy][gx] = null;
+      else if (editorTool === 'fill') floodFill(editorGrid, gx, gy, editorColor);
+      beep(600, 0.05); return;
+    }
+    // Palette click
+    for (let i = 0; i < EDITOR_PALETTE.length; i++) {
+      const col = i % g.palCols, row = Math.floor(i / g.palCols);
+      const px = g.palX + col * (g.palSz + g.palGap), py = g.palY + row * (g.palSz + g.palGap);
+      if (mouseX >= px && mouseX <= px + g.palSz && mouseY >= py && mouseY <= py + g.palSz) {
+        editorColor = EDITOR_PALETTE[i]; beep(500, 0.06); return;
+      }
+    }
+    // HS square (handled via mousedown drag — click just starts drag)
+    if (mouseX >= g.cpX && mouseX <= g.cpX + g.cpW && mouseY >= g.cpY && mouseY <= g.cpY + g.cpH) return;
+    // L slider
+    if (mouseX >= g.cpSlX && mouseX <= g.cpSlX + g.cpSlW && mouseY >= g.cpSlY && mouseY <= g.cpSlY + g.cpSlH) return;
+    // Add to swatches button
+    const addBtnX = g.cpX + g.cpPrevSz + 4;
+    if (mouseX >= addBtnX && mouseX <= addBtnX + 36 && mouseY >= g.cpPrevY && mouseY <= g.cpPrevY + g.cpPrevSz) {
+      if (customSwatches.length < 30 && !customSwatches.includes(editorColor)) {
+        customSwatches.push(editorColor); saveCustomSwatches(); beep(700, 0.08);
+      }
+      return;
+    }
+    // Custom swatch click
+    for (let i = 0; i < customSwatches.length; i++) {
+      const col = i % g.swCols2, row = Math.floor(i / g.swCols2);
+      const sx = g.swX + col * (g.swSz + g.swGap), sy = g.swY + row * (g.swSz + g.swGap);
+      if (mouseX >= sx && mouseX <= sx + g.swSz && mouseY >= sy && mouseY <= sy + g.swSz) {
+        editorColor = customSwatches[i]; beep(500, 0.06); return;
+      }
+    }
+    // Clear swatches
+    const swRows = Math.ceil(customSwatches.length / g.swCols2);
+    const clearSwY = g.swY + Math.max(1, swRows) * (g.swSz + g.swGap) + 2;
+    if (customSwatches.length > 0 && mouseX >= g.swX && mouseX <= g.swX + 60 && mouseY >= clearSwY && mouseY <= clearSwY + 16) {
+      customSwatches = []; saveCustomSwatches(); beep(200, 0.08); return;
+    }
+    // Tool row (horizontal, below grid)
+    const tools = ['pen','eraser','fill'];
+    const tbw = 52;
+    for (let i = 0; i < tools.length; i++) {
+      const tx = g.edGx + i * (tbw + 4), ty = g.toolRowY;
+      if (mouseX >= tx && mouseX <= tx + tbw && mouseY >= ty && mouseY <= ty + 22) {
+        editorTool = tools[i]; beep(450, 0.06); return;
+      }
+    }
+    // Action row (horizontal: Upload | Clear | Apply)
+    const abw = 56;
+    const actions = ['upload','clear','apply'];
+    for (let i = 0; i < actions.length; i++) {
+      const ax = g.edGx + i * (abw + 4), ay = g.actRowY;
+      if (mouseX >= ax && mouseX <= ax + abw && mouseY >= ay && mouseY <= ay + 24) {
+        if (actions[i] === 'upload') { fileInput.click(); return; }
+        if (actions[i] === 'clear') { editorGrid = newEmptyGrid(); beep(200, 0.1); return; }
+        if (actions[i] === 'apply') {
+          pixelArt = editorGrid.map(r => [...r]);
+          bakePixelArt(pixelArt);
+          if (selectedSlot >= 0 && editorGrid) {
+            const data = editorGrid.map(r => [...r]);
+            pixelArtSlots[selectedSlot] = { data, thumb: makeThumb(data) };
+          }
+          savePixelArtSlots(); beep(800, 0.15); return;
+        }
+      }
+    }
+    // Save slots
+    const maxSlots = paidAccount ? 10 : 3;
+    for (let i = 0; i < maxSlots; i++) {
+      const sx = g.edGx + i * (g.slotW + g.slotGap), sy = g.slotY;
+      // X button to delete (top-right corner of slot)
+      if (pixelArtSlots[i] && mouseX >= sx + g.slotW - 12 && mouseX <= sx + g.slotW && mouseY >= sy && mouseY <= sy + 12) {
+        pixelArtSlots[i] = null;
+        if (selectedSlot === i) selectedSlot = -1;
+        savePixelArtSlots(); beep(200, 0.08); return;
+      }
+      if (mouseX >= sx && mouseX <= sx + g.slotW && mouseY >= sy && mouseY <= sy + g.slotH) {
+        if (selectedSlot === i) { selectedSlot = -1; beep(300, 0.06); }
+        else if (selectedSlot >= 0) { selectedSlot = i; beep(600, 0.08); }
+        else if (pixelArtSlots[i]) {
+          editorGrid = pixelArtSlots[i].data.map(r => [...r]);
+          pixelArt = editorGrid.map(r => [...r]);
+          bakePixelArt(pixelArt); savePixelArtSlots(); beep(700, 0.1);
+        } else { selectedSlot = i; beep(600, 0.08); }
+        return;
+      }
+    }
+    // Upgrade button
+    if (!paidAccount) {
+      const upY = g.slotY + g.slotH + 6;
+      if (mouseX >= g.edGx && mouseX <= g.edGx + 140 && mouseY >= upY && mouseY <= upY + 22) {
+        paidAccount = true; localStorage.setItem('pong_paid', 'true'); beep(1000, 0.2); return;
+      }
+    }
+  }
+}
+
+// ── Input ────────────────────────────────────────────────────
+C.addEventListener('mousedown', e => {
+  if (paused && pauseTab === 'editor') {
+    const g = pauseGridLayout();
+    // Color picker drag start — HS square
+    if (e.clientX >= g.cpX && e.clientX <= g.cpX + g.cpW && e.clientY >= g.cpY && e.clientY <= g.cpY + g.cpH) {
+      pickerDragging = 'hs';
+      pickerH = clamp((e.clientX - g.cpX) / g.cpW, 0, 1) * 360;
+      pickerS = 1 - clamp((e.clientY - g.cpY) / g.cpH, 0, 1);
+      editorColor = hslToHex(pickerH, pickerS, pickerL);
+      return;
+    }
+    // Color picker drag start — Lightness slider
+    if (e.clientX >= g.cpSlX && e.clientX <= g.cpSlX + g.cpSlW && e.clientY >= g.cpSlY && e.clientY <= g.cpSlY + g.cpSlH) {
+      pickerDragging = 'l';
+      pickerL = 1 - clamp((e.clientY - g.cpSlY) / g.cpSlH, 0, 1);
+      editorColor = hslToHex(pickerH, pickerS, pickerL);
+      return;
+    }
+    // Pixel grid drag
+    if (editorGrid && editorTool !== 'fill') {
+      const gx = Math.floor((e.clientX - g.edGx) / g.edCellSz);
+      const gy = Math.floor((e.clientY - g.edGy) / g.edCellSz);
+      if (gx >= 0 && gx < PIX_GRID && gy >= 0 && gy < PIX_GRID) {
+        editorDrawing = true;
+        editorGrid[gy][gx] = editorTool === 'eraser' ? null : editorColor;
+      }
+    }
+  }
+});
+C.addEventListener('mouseup', () => { editorDrawing = false; pickerDragging = null; });
+C.addEventListener('mousemove', e => {
+  mouseX = e.clientX; mouseY = e.clientY;
+  // Only update color picker while mouse button is held down
+  if (pickerDragging && paused && pauseTab === 'editor') {
+    const g = pauseGridLayout();
+    if (pickerDragging === 'hs') {
+      pickerH = clamp((mouseX - g.cpX) / g.cpW, 0, 1) * 360;
+      pickerS = 1 - clamp((mouseY - g.cpY) / g.cpH, 0, 1);
+    } else if (pickerDragging === 'l') {
+      pickerL = 1 - clamp((mouseY - g.cpSlY) / g.cpSlH, 0, 1);
+    }
+    editorColor = hslToHex(pickerH, pickerS, pickerL);
+  }
+  if (editorDrawing && paused && pauseTab === 'editor' && editorGrid) {
+    const g = pauseGridLayout();
+    const gx = Math.floor((mouseX - g.edGx) / g.edCellSz);
+    const gy = Math.floor((mouseY - g.edGy) / g.edCellSz);
+    if (gx >= 0 && gx < PIX_GRID && gy >= 0 && gy < PIX_GRID) {
+      editorGrid[gy][gx] = editorTool === 'eraser' ? null : editorColor;
+    }
+  }
+});
+C.addEventListener('click', () => {
+  if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+  if (roundOver) { init(); return; }
+  if (paused) { handlePauseClick(); return; }
+  if (gameOver) { gameOver = false; spectating = false; started = false; init(); return; }
+  if (spectating) { spectating = false; started = false; init(); return; }
+  if (!started) {
+    // Check which button was clicked
+    const btnW = 200, btnH = 44, gap = 20;
+    const startBtnX = W / 2 - btnW - gap / 2, btnY = H / 2 + 45;
+    const watchBtnX = W / 2 + gap / 2;
+    if (mouseX >= watchBtnX && mouseX <= watchBtnX + btnW && mouseY >= btnY && mouseY <= btnY + btnH) {
+      enteringName = false; spectating = true; started = true; beep(440, 0.12); return;
+    }
+    if (playerName.length > 0 && mouseX >= startBtnX && mouseX <= startBtnX + btnW && mouseY >= btnY && mouseY <= btnY + btnH) {
+      enteringName = false; started = true; beep(550, 0.12); return;
+    }
+    return;
+  }
+  if (ball.held) {
+    const a = rand(0, Math.PI * 2);
+    ball.vx = Math.cos(a) * 120; ball.vy = Math.sin(a) * 120;
+    ball.vz = -rand(200, 300); ball.held = false; ball.canHit = false;
+    ball.avx = rand(-3, 3); ball.avy = rand(-3, 3);
+    beep(330, 0.15);
+  }
+});
+window.addEventListener('keydown', e => {
+  if (!started) {
+    if (e.key === 'Enter' && playerName.length > 0) { enteringName = false; started = true; beep(550, 0.12); }
+    else if (e.key === 'Backspace') playerName = playerName.slice(0, -1);
+    else if (e.key.length === 1 && playerName.length < 16) playerName += e.key.toUpperCase();
+    e.preventDefault(); return;
+  }
+  if ((e.key === 'Escape' || e.key === 'Control') && started && !gameOver) {
+    paused = !paused;
+    document.body.style.cursor = paused ? '' : 'none';
+    if (paused) loadLeaderboard();
+    e.preventDefault(); return;
+  }
+  if (e.code.startsWith('Arrow')) e.preventDefault();
+});
+
+// ── 3D Projection (with slight CCW rotation) ────────────────
+function proj(wx, wy, wz) {
+  const dx = wx - camX, dy = wy - camY;
+  const rx = dx * COS_R - dy * SIN_R;
+  const ry = dx * SIN_R + dy * COS_R;
+  return [W / 2 + rx * SC, H / 2 + ry * SC * TILT - (wz || 0) * SC * ZSCL];
+}
+
+// ── Particles ────────────────────────────────────────────────
+function spawnP(wx, wy, col, n) {
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, Math.PI * 2), s = rand(40, 180);
+    particles.push({ x: wx, y: wy, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, decay: rand(1.5, 3.5), r: rand(2, 5), col });
+  }
+}
+
+// ── Ball physics (shared by player + dummies) ────────────────
+function updateBallPhysics(b, dt, sm) {
+  b.x += b.vx * sm * dt; b.y += b.vy * sm * dt;
+  b.vz -= GRAV * dt; b.z += b.vz * dt;
+  if (b.z < 0) b.z = 0;
+  b.rotX += b.avx * dt; b.rotY += b.avy * dt;
+  b.avx *= 0.997; b.avy *= 0.997;
+  if (b.z <= 0) {
+    b.z = 0; b.vz = BOUNCE_VZ;
+    b.vx *= 0.95; b.vy *= 0.95;
+    b.avx += b.vy * 0.004; b.avy -= b.vx * 0.004;
+    b.canHit = true;
+    return 'bounce';
+  }
+  if (b.x < BALL_R) { b.x = BALL_R; b.vx = Math.abs(b.vx); b.avy += rand(-2, 2); }
+  if (b.x > AW - BALL_R) { b.x = AW - BALL_R; b.vx = -Math.abs(b.vx); b.avy += rand(-2, 2); }
+  if (b.y < BALL_R) { b.y = BALL_R; b.vy = Math.abs(b.vy); b.avx += rand(-2, 2); }
+  if (b.y > AH - BALL_R) { b.y = AH - BALL_R; b.vy = -Math.abs(b.vy); b.avx += rand(-2, 2); }
+  for (const o of obstacles) {
+    if (b.z > o.ht) continue;
+    const cx = clamp(b.x, o.x, o.x + o.w), cy = clamp(b.y, o.y, o.y + o.h);
+    const ddx = b.x - cx, ddy = b.y - cy, d = Math.hypot(ddx, ddy);
+    if (d < BALL_R && d > 0) {
+      if (Math.abs(ddx) > Math.abs(ddy)) { b.vx = ddx > 0 ? Math.abs(b.vx) : -Math.abs(b.vx); b.avy += rand(-3, 3); }
+      else { b.vy = ddy > 0 ? Math.abs(b.vy) : -Math.abs(b.vy); b.avx += rand(-3, 3); }
+      b.x += (ddx / d) * (BALL_R - d); b.y += (ddy / d) * (BALL_R - d);
+    }
+  }
+  b.rotX += Math.hypot(b.vx, b.vy) * dt * 0.003;
+  return null;
+}
+
+// ═════════════════════════════════════════════════════════════
+//  UPDATE
+// ═════════════════════════════════════════════════════════════
+function update(dt) {
+  prevHX = handX; prevHY = handY;
+
+  if (started && !paused && !spectating) {
+    // Unproject mouse at z=PZ (inverse rotation)
+    const rawX = (mouseX - W / 2) / SC;
+    const rawY = (mouseY - H / 2 + PZ * SC * ZSCL) / (SC * TILT);
+    handX = camX + rawX * COS_R + rawY * SIN_R;
+    handY = camY - rawX * SIN_R + rawY * COS_R;
+    handVX = (handX - prevHX) / (dt || 0.016);
+    handVY = (handY - prevHY) / (dt || 0.016);
+
+    // Smooth paddle tilt from velocity (max ~12 degrees each direction)
+    const MAX_TILT = 0.21; // ~12 degrees
+    const targetTX = clamp(handVX * 0.0004, -MAX_TILT, MAX_TILT);
+    const targetTY = clamp(handVY * 0.0004, -MAX_TILT, MAX_TILT);
+    handTiltX += (targetTX - handTiltX) * Math.min(1, 9 * dt);
+    handTiltY += (targetTY - handTiltY) * Math.min(1, 9 * dt);
+
+    const cs = 4.5 * dt;
+    camX += (handX - camX) * cs; camY += (handY - camY) * cs;
+    const PAD = 200; // extra breathing room past arena edges
+    camX = clamp(camX, -PAD + W / (2 * SC), AW + PAD - W / (2 * SC));
+    camY = clamp(camY, -PAD + H / (2 * SC), AH + PAD - H / (2 * SC));
+  }
+  if (spectating) {
+    // Mouse-driven camera pan
+    const rawX = (mouseX - W / 2) / SC;
+    const rawY = (mouseY - H / 2) / (SC * TILT);
+    const targX = AW / 2 + rawX * COS_R + rawY * SIN_R;
+    const targY = AH / 2 - rawX * SIN_R + rawY * COS_R;
+    const PAD = 200;
+    const clampedX = clamp(targX, -PAD + W / (2 * SC), AW + PAD - W / (2 * SC));
+    const clampedY = clamp(targY, -PAD + H / (2 * SC), AH + PAD - H / (2 * SC));
+    camX += (clampedX - camX) * 3 * dt;
+    camY += (clampedY - camY) * 3 * dt;
+    handX = -9999; handY = -9999;
+  }
+
+  // Update movers
+  for (const m of movers) {
+    if (m.dir === 'h') {
+      m.x += m.speed * dt;
+      if (m.x < 0) { m.x = 0; m.speed = Math.abs(m.speed); }
+      if (m.x > AW - m.sz) { m.x = AW - m.sz; m.speed = -Math.abs(m.speed); }
+    } else {
+      m.y += m.speed * dt;
+      if (m.y < 0) { m.y = 0; m.speed = Math.abs(m.speed); }
+      if (m.y > AH - m.sz) { m.y = AH - m.sz; m.speed = -Math.abs(m.speed); }
+    }
+  }
+
+  // Round timer
+  if (started && !roundOver) {
+    roundTimer += dt;
+    // End round on timer OR when only 3 players remain
+    const aliveCount = dummies.filter(d => !d.dead).length + (gameOver ? 0 : (spectating ? 0 : 1));
+    if (roundTimer >= ROUND_DURATION || aliveCount <= 3) {
+      roundOver = true;
+      if (!gameOver && score > 0) saveScore(playerName || 'PLAYER', score);
+      loadLeaderboard();
+      recordRoundResult();
+    }
+  }
+
+  // Update dummy movement + balls regardless of game state
+  const MZ = PZ / 2;
+  for (const d of dummies) {
+    if (d.dead) continue; // Frozen — skip all updates
+    const b = d.ball;
+    if (b.held) {
+      // Wander while holding ball — move around the map actively
+      d.t -= dt; if (d.t <= 0) { d.tx = rand(100, AW - 100); d.ty = rand(100, AH - 100); d.t = rand(1, 3); }
+      d.x += (d.tx - d.x) * 2.5 * dt; d.y += (d.ty - d.y) * 2.5 * dt;
+      b.x = d.x; b.y = d.y; b.z = PZ;
+      d.dropT -= dt;
+      if (d.dropT <= 0) {
+        const a = rand(0, Math.PI * 2);
+        b.vx = Math.cos(a) * rand(150, 300); b.vy = Math.sin(a) * rand(150, 300);
+        b.vz = -rand(250, 350); b.held = false; b.canHit = false; b.hitThisArc = true;
+        b.avx = rand(-3, 3); b.avy = rand(-3, 3);
+      }
+    } else {
+      // Physics-based paddle movement — accelerate toward ball's actual position
+      const accel = 1400 + d.skill * 3200; // 1400 (worst) to 4600 (best)
+      const maxSpd = 550 + d.skill * 1100;  // 550 (worst) to 1650 (best)
+      const friction = 4 - d.skill * 1.5; // 4 (worst) to 2.5 (best)
+      const targX = b.x;
+      const targY = b.y;
+      // Subtle jitter — simulate human hand shakiness
+      d.jitterT = (d.jitterT || 0) + dt;
+      const jx = Math.sin(d.jitterT * 5 + d.skill * 5) * 4;
+      const jy = Math.cos(d.jitterT * 4 + d.skill * 3) * 4;
+      const dx = targX + jx - d.x, dy = targY + jy - d.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > 1) {
+        d.vx += (dx / dist) * accel * dt;
+        d.vy += (dy / dist) * accel * dt;
+      }
+      // Friction
+      d.vx *= Math.max(0, 1 - friction * dt);
+      d.vy *= Math.max(0, 1 - friction * dt);
+      // Clamp speed
+      const spd = Math.hypot(d.vx, d.vy);
+      if (spd > maxSpd) { d.vx *= maxSpd / spd; d.vy *= maxSpd / spd; }
+      d.x += d.vx * dt; d.y += d.vy * dt;
+      // Keep in bounds
+      d.x = clamp(d.x, BALL_R, AW - BALL_R);
+      d.y = clamp(d.y, BALL_R, AH - BALL_R);
+
+      if (updateBallPhysics(b, dt, 1) === 'bounce') {
+        // Ball hit the ground — if it wasn't hit this arc, that's a miss
+        if (!b.hitThisArc) {
+          d.lives = (d.lives || 1) - 1;
+          if (d.lives <= 0) {
+            d.dead = true;
+            beep(90, 0.4, 'sawtooth', 0.06);
+            spawnCombatText(d.name, d.col);
+          }
+        }
+        b.hitThisArc = false;
+        b.canHit = true;
+      }
+      // Portal collision for AI balls — teleport to random exit portal
+      if (b.vz > 0 && b.z <= MZ && b.z > MZ - 60) {
+        for (let mi = 0; mi < movers.length; mi++) {
+          const m = movers[mi];
+          if (b.x > m.x && b.x < m.x + m.sz && b.y > m.y && b.y < m.y + m.sz) {
+            const others = movers.filter((_, i) => i !== mi);
+            const exit = others[Math.floor(Math.random() * others.length)];
+            spawnP(b.x, b.y, '#0ff', 8);
+            b.x = exit.x + exit.sz / 2;
+            b.y = exit.y + exit.sz / 2;
+            b.z = MZ + 1;
+            b.vz = -Math.abs(b.vz);
+            spawnP(b.x, b.y, '#f0f', 8);
+            beep(1200, 0.1, 'sine', 0.04);
+            break;
+          }
+        }
+      }
+      // Hit check — ball near paddle height, descending, paddle underneath
+      const hitDist = Math.hypot(b.x - d.x, b.y - d.y);
+      if (b.canHit && b.vz <= 0 && b.z >= PZ * 0.8 && hitDist < HAND_R * 1.1) {
+        b.canHit = false;
+        b.hitThisArc = true;
+        d.lives = 1; // reset lives on successful hit
+        // Strong hit in a random direction — sends ball flying far across map
+        const a = rand(0, Math.PI * 2);
+        const hitPower = rand(280, 480);
+        b.vx = Math.cos(a) * hitPower;
+        b.vy = Math.sin(a) * hitPower;
+        b.vz = -HIT_VZ; b.z = PZ;
+        b.avx += rand(-5, 5); b.avy += rand(-5, 5);
+        d.hits++;
+      }
+    }
+  }
+
+  if (!started || gameOver || paused || spectating) return;
+  if (ball.held) { ball.x = handX; ball.y = handY; ball.z = PZ; return; }
+
+  const sm = speedMult;
+  if (updateBallPhysics(ball, dt, sm) === 'bounce') {
+    beep(180 + BOUNCE_VZ * 0.3, 0.1, 'triangle', 0.03);
+    ball.canHit = true;
+  }
+
+  // Portal collision — teleport ball to random exit portal
+  if (ball.vz > 0 && ball.z <= MZ && ball.z > MZ - 60) {
+    for (let mi = 0; mi < movers.length; mi++) {
+      const m = movers[mi];
+      if (ball.x > m.x && ball.x < m.x + m.sz && ball.y > m.y && ball.y < m.y + m.sz) {
+        const others = movers.filter((_, i) => i !== mi);
+        const exit = others[Math.floor(Math.random() * others.length)];
+        spawnP(ball.x, ball.y, '#0ff', 12);
+        ball.x = exit.x + exit.sz / 2;
+        ball.y = exit.y + exit.sz / 2;
+        ball.z = MZ + 1;
+        ball.vz = -Math.abs(ball.vz);
+        spawnP(ball.x, ball.y, '#f0f', 12);
+        beep(1200, 0.15, 'sine', 0.06);
+        break;
+      }
+    }
+  }
+
+  // Hit — ball near peak height
+  if (ball.canHit && ball.z >= PZ * 0.85) {
+    const dx = ball.x - handX, dy = ball.y - handY;
+    if (Math.hypot(dx, dy) < HAND_R + BALL_R + 10) {
+      // HIT — ball direction based on where it lands on the paddle
+      ball.canHit = false;
+      const hitR = HAND_R + BALL_R + 10;
+      const offX = dx / hitR;  // -1 (left) to +1 (right)
+      const offY = dy / hitR;  // -1 (top) to +1 (bottom)
+      const speed = HIT_XY * sm;
+      ball.vx = offX * speed + rand(-20, 20);
+      ball.vy = offY * speed + rand(-20, 20);
+      ball.vz = -HIT_VZ * sm; ball.z = PZ;
+      ball.avx += rand(-4, 4); ball.avy += rand(-4, 4);
+      score++; combo++; hitFlash = 1; speedMult = 1 + score * 0.012;
+      spawnP(ball.x, ball.y, '#fff', 12);
+      beep(660 + combo * 30, 0.18, 'sine', 0.07);
+    } else if (ball.vz <= 0) {
+      // Ball peaked without being caught — GAME OVER → spectate
+      ball.canHit = false;
+      gameOver = true; combo = 0;
+      gameOverTime = performance.now();
+      if (score > 0) saveScore(playerName || 'PLAYER', score);
+      loadLeaderboard();
+      spectating = true;
+      // Lock paddle position
+      frozenHandX = handX; frozenHandY = handY;
+      beep(120, 0.5, 'sawtooth', 0.08);
+      spawnCombatText(playerName || 'PLAYER', '#ff4466');
+      return;
+    }
+  }
+
+  // Player can hit AI balls near peak height
+  for (const d of dummies) {
+    if (d.dead) continue;
+    const b = d.ball;
+    if (b.held || !b.canHit) continue;
+    if (b.z < PZ * 0.85) continue;
+    const dx = b.x - handX, dy = b.y - handY;
+    const dist = Math.hypot(dx, dy);
+    if (dist < HAND_R + BALL_R + 10) {
+      b.canHit = false;
+      b.hitThisArc = true;
+      const hitR = HAND_R + BALL_R + 10;
+      const offX = dx / hitR;
+      const offY = dy / hitR;
+      const speed = HIT_XY * sm;
+      b.vx = offX * speed + rand(-20, 20);
+      b.vy = offY * speed + rand(-20, 20);
+      b.vz = -HIT_VZ; b.z = PZ;
+      b.avx += rand(-4, 4); b.avy += rand(-4, 4);
+      score++; combo++; hitFlash = 1; speedMult = 1 + score * 0.012;
+      spawnP(b.x, b.y, d.col, 12);
+      beep(220, 0.12, 'triangle', 0.05);
+    }
+  }
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i]; p.x += p.vx * dt; p.y += p.vy * dt;
+    p.life -= p.decay * dt; if (p.life <= 0) particles.splice(i, 1);
+  }
+  if (hitFlash > 0) hitFlash = Math.max(0, hitFlash - dt * 4);
+}
+
+// ═════════════════════════════════════════════════════════════
+//  RENDERING
+// ═════════════════════════════════════════════════════════════
+function render() {
+  X.clearRect(0, 0, W, H);
+  X.fillStyle = '#0a0a15'; X.fillRect(0, 0, W, H);
+  drawFloor(); drawObstacles(); drawMovers();
+  drawDummyBalls(); drawDummies();
+  if (!spectating) { drawBallShadow(); drawBall(); drawHand(); }
+  if (gameOver) drawFrozenHand();
+  drawParticlesR(); drawWalls(); drawDebugLines();
+  if (!spectating) drawHUD();
+  if (started) drawLeaderboard();
+  if (hitFlash > 0) { X.fillStyle = `rgba(255,255,255,${hitFlash * 0.08})`; X.fillRect(0, 0, W, H); }
+  if (!started) drawStart();
+  if (spectating) {
+    X.font = '700 14px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'top';
+    X.fillStyle = 'rgba(255,255,255,0.3)'; X.fillText('SPECTATING', W / 2, 40);
+    X.font = '400 11px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.2)';
+    X.fillText('CLICK TO PLAY AGAIN', W / 2, 62);
+    // Cursor
+    const cx = mouseX, cy = mouseY, cs = 12;
+    X.strokeStyle = 'rgba(255,255,255,0.5)'; X.lineWidth = 1.5; X.lineCap = 'round';
+    X.beginPath(); X.moveTo(cx - cs, cy); X.lineTo(cx + cs, cy); X.stroke();
+    X.beginPath(); X.moveTo(cx, cy - cs); X.lineTo(cx, cy + cs); X.stroke();
+    X.beginPath(); X.arc(cx, cy, cs * 0.55, 0, Math.PI * 2);
+    X.strokeStyle = 'rgba(255,255,255,0.3)'; X.lineWidth = 1; X.stroke();
+    drawStats();
+  }
+  if (started) drawRoundTimer();
+  if (paused) drawPaused();
+  if (gameOver) drawGameOver();
+  if (roundOver) drawRoundEnd();
+  drawCombatTexts(gDt);
+  // Server number
+  X.font = '400 10px Orbitron,sans-serif'; X.textAlign = 'right'; X.textBaseline = 'bottom';
+  X.fillStyle = 'rgba(255,255,255,0.15)';
+  X.fillText('SERVER #4821-US-W', W - 12, H - 12);
+}
+
+function drawFloor() {
+  const [x0, y0] = proj(0, 0, 0), [x1, y1] = proj(AW, 0, 0), [x2, y2] = proj(AW, AH, 0), [x3, y3] = proj(0, AH, 0);
+  X.beginPath(); X.moveTo(x0, y0); X.lineTo(x1, y1); X.lineTo(x2, y2); X.lineTo(x3, y3);
+  X.closePath(); X.fillStyle = '#0a1a0f'; X.fill();
+  X.strokeStyle = 'rgba(255,255,255,0.025)'; X.lineWidth = 1;
+  for (let gx = 0; gx <= AW; gx += 100) { const [a, b] = proj(gx, 0, 0), [c, d] = proj(gx, AH, 0); X.beginPath(); X.moveTo(a, b); X.lineTo(c, d); X.stroke(); }
+  for (let gy = 0; gy <= AH; gy += 100) { const [a, b] = proj(0, gy, 0), [c, d] = proj(AW, gy, 0); X.beginPath(); X.moveTo(a, b); X.lineTo(c, d); X.stroke(); }
+}
+
+function drawWalls() {
+  const corners = [[0, 0], [AW, 0], [AW, AH], [0, AH]];
+  X.shadowColor = '#0f0'; X.shadowBlur = 22; X.strokeStyle = '#0f0'; X.lineWidth = 2;
+  for (let i = 0; i < 4; i++) {
+    const [a, b] = proj(...corners[i], 0), [c, d] = proj(...corners[(i + 1) % 4], 0);
+    X.beginPath(); X.moveTo(a, b); X.lineTo(c, d); X.stroke();
+  }
+  X.shadowBlur = 0;
+  const wallH = 80;
+  { const [a, b] = proj(0, AH, 0), [c, d] = proj(AW, AH, 0), [e, f] = proj(AW, AH, wallH), [g, h] = proj(0, AH, wallH);
+    X.beginPath(); X.moveTo(a, b); X.lineTo(c, d); X.lineTo(e, f); X.lineTo(g, h); X.closePath();
+    X.fillStyle = 'rgba(0,120,50,0.85)'; X.fill(); X.strokeStyle = '#0f0'; X.lineWidth = 1; X.stroke(); }
+  { const [a, b] = proj(AW, 0, 0), [c, d] = proj(AW, AH, 0), [e, f] = proj(AW, AH, wallH), [g, h] = proj(AW, 0, wallH);
+    X.beginPath(); X.moveTo(a, b); X.lineTo(c, d); X.lineTo(e, f); X.lineTo(g, h); X.closePath();
+    X.fillStyle = 'rgba(0,100,40,0.75)'; X.fill(); X.strokeStyle = '#0f0'; X.lineWidth = 1; X.stroke(); }
+}
+
+function drawObstacles() {
+  const sorted = [...obstacles].sort((a, b) => a.y - b.y);
+  for (const o of sorted) {
+    const h = o.ht;
+    const [a, b] = proj(o.x, o.y, h), [c, d] = proj(o.x + o.w, o.y, h), [e, f] = proj(o.x + o.w, o.y + o.h, h), [g, i] = proj(o.x, o.y + o.h, h);
+    X.beginPath(); X.moveTo(a, b); X.lineTo(c, d); X.lineTo(e, f); X.lineTo(g, i); X.closePath();
+    X.fillStyle = 'rgba(30,160,80,0.7)'; X.fill();
+    X.strokeStyle = '#0f0'; X.lineWidth = 1; X.stroke();
+    const [j, k] = proj(o.x, o.y + o.h, 0), [l, m] = proj(o.x + o.w, o.y + o.h, 0);
+    X.beginPath(); X.moveTo(g, i); X.lineTo(e, f); X.lineTo(l, m); X.lineTo(j, k); X.closePath();
+    X.fillStyle = 'rgba(20,110,55,0.8)'; X.fill(); X.strokeStyle = 'rgba(0,255,0,0.4)'; X.stroke();
+    // Left side face (x edge)
+    const [n, p] = proj(o.x, o.y, 0), [q, r] = proj(o.x, o.y + o.h, 0);
+    X.beginPath(); X.moveTo(a, b); X.lineTo(g, i); X.lineTo(q, r); X.lineTo(n, p); X.closePath();
+    X.fillStyle = 'rgba(15,90,45,0.85)'; X.fill(); X.strokeStyle = 'rgba(0,255,0,0.4)'; X.stroke();
+  }
+}
+
+function drawBallShadow() {
+  if (ball.held && !started) return;
+  const [sx, sy] = proj(ball.x, ball.y, 0);
+  const r = BALL_R * SC * 0.85;
+  const alpha = clamp(0.35 - ball.z * 0.001, 0.04, 0.35);
+  X.beginPath(); X.ellipse(sx, sy, r * 1.2, r * 1.2 * TILT * 0.8, 0, 0, Math.PI * 2);
+  X.fillStyle = `rgba(0,0,0,${alpha})`; X.fill();
+}
+
+function drawSphere(bx, by, r, b, alpha) {
+  X.save(); X.globalAlpha = alpha;
+  X.beginPath(); X.arc(bx, by, r, 0, Math.PI * 2); X.clip();
+  const lg = X.createRadialGradient(bx - r * 0.35, by - r * 0.35, 0, bx + r * 0.05, by + r * 0.05, r * 1.15);
+  const bc = BALL_COLORS[selectedBallColor].stops;
+  lg.addColorStop(0, bc[0]); lg.addColorStop(0.35, bc[1]); lg.addColorStop(0.7, bc[2]); lg.addColorStop(1, bc[3]);
+  X.fillStyle = lg; X.fillRect(bx - r, by - r, r * 2, r * 2);
+  const faceOX = Math.sin(b.rotY) * r * 0.55;
+  const faceOY = -Math.sin(b.rotX) * r * 0.55;
+  const facing = Math.cos(b.rotY) * Math.cos(b.rotX);
+  if (facing > 0.15) {
+    const fr = r * 0.9 * facing;
+    X.globalAlpha = facing * 0.9 * alpha;
+    X.drawImage(faceTextures[selectedFace], bx + faceOX - fr, by + faceOY - fr, fr * 2, fr * 2);
+    X.globalAlpha = alpha;
+  }
+  const sg = X.createRadialGradient(bx - r * 0.3, by - r * 0.38, 0, bx - r * 0.3, by - r * 0.38, r * 0.38);
+  sg.addColorStop(0, 'rgba(255,255,255,0.6)'); sg.addColorStop(0.5, 'rgba(255,255,255,0.12)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+  X.fillStyle = sg; X.fillRect(bx - r, by - r, r * 2, r * 2);
+  const rg = X.createRadialGradient(bx, by, r * 0.55, bx, by, r);
+  rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(0.6, 'rgba(0,0,0,0.08)'); rg.addColorStop(1, 'rgba(0,0,0,0.35)');
+  X.fillStyle = rg; X.fillRect(bx - r, by - r, r * 2, r * 2);
+  X.restore();
+}
+
+function drawBall() {
+  const [bx, by] = proj(ball.x, ball.y, ball.z);
+  const zFrac = clamp(ball.z / PZ, 0, 1.2);
+  const r = BALL_R * SC * (0.28 + 0.72 * zFrac);
+  if (r < 1) return;
+  if (ball.held && !started) {
+    const [hx, hy] = proj(handX, handY, PZ);
+    X.beginPath(); X.arc(hx, hy, r, 0, Math.PI * 2); X.fillStyle = 'rgba(255,255,255,0.4)'; X.fill();
+    return;
+  }
+  drawSphere(bx, by, r, ball, 1);
+  if (ball.z > 10) {
+    const [sx, sy] = proj(ball.x, ball.y, 0);
+    X.setLineDash([3, 4]); X.strokeStyle = 'rgba(255,255,255,0.08)'; X.lineWidth = 1;
+    X.beginPath(); X.moveTo(sx, sy); X.lineTo(bx, by); X.stroke(); X.setLineDash([]);
+  }
+  const pct = Math.round(zFrac * 100);
+  const barX = bx + r + 6 * SC, barH = 28 * SC, barW = 3 * SC, barY = by - barH / 2;
+  X.fillStyle = 'rgba(255,255,255,0.1)'; X.fillRect(barX, barY, barW, barH);
+  const fillH = barH * clamp(zFrac, 0, 1);
+  const atMax = zFrac >= 0.95;
+  X.fillStyle = atMax ? '#0f0' : 'rgba(255,255,255,0.5)';
+  X.fillRect(barX, barY + barH - fillH, barW, fillH);
+  X.font = `700 ${Math.max(8, SC * 7)}px Orbitron,sans-serif`;
+  X.textAlign = 'left'; X.textBaseline = 'middle';
+  X.fillStyle = atMax ? '#0f0' : 'rgba(255,255,255,0.45)';
+  X.fillText(`${Math.min(pct, 100)}%`, barX + barW + 3 * SC, by);
+}
+
+function drawMovers() {
+  const MZ = PZ / 2;
+  for (const m of movers) {
+    const cx = m.x + m.sz / 2, cy = m.y + m.sz / 2;
+    const [p0x, p0y] = proj(m.x, m.y, MZ);
+    const [p1x, p1y] = proj(m.x + m.sz, m.y, MZ);
+    const [p2x, p2y] = proj(m.x + m.sz, m.y + m.sz, MZ);
+    const [p3x, p3y] = proj(m.x, m.y + m.sz, MZ);
+    const pulse = 0.5 + Math.sin(Date.now() * 0.004 + cx * 0.01) * 0.5;
+    const portalCol = `hsl(${180 + pulse * 120}, 100%, 60%)`;
+    X.beginPath(); X.moveTo(p0x, p0y); X.lineTo(p1x, p1y); X.lineTo(p2x, p2y); X.lineTo(p3x, p3y); X.closePath();
+    X.fillStyle = 'rgba(10,0,20,0.85)'; X.fill();
+    X.strokeStyle = portalCol; X.lineWidth = 2; X.stroke();
+  }
+}
+
+function drawDummyBalls() {
+  for (const d of dummies) {
+    if (d.dead) continue;
+    const b = d.ball;
+    if (b.held) continue;
+    // Shadow
+    const [sx, sy] = proj(b.x, b.y, 0);
+    const sr = BALL_R * SC * 0.6;
+    const sa = clamp(0.15 - b.z * 0.0005, 0.02, 0.15);
+    X.beginPath(); X.ellipse(sx, sy, sr, sr * TILT * 0.7, 0, 0, Math.PI * 2);
+    X.fillStyle = `rgba(0,0,0,${sa})`; X.fill();
+    // Ball
+    const zF = clamp(b.z / PZ, 0, 1.2);
+    const r = BALL_R * SC * (0.28 + 0.72 * zF);
+    if (r < 1) continue;
+    const [bx, by] = proj(b.x, b.y, b.z);
+    drawSphere(bx, by, r, b, 1);
+  }
+}
+
+// ── 3D Paddle ────────────────────────────────────────────────
+function drawPaddle(wx, wy, r, tiltX, tiltY, alpha, topCol, sideCol) {
+  const THICK = 16;
+  const [cx, cy] = proj(wx, wy, PZ);
+  const [bcx, bcy] = proj(wx, wy, PZ - THICK);
+  const eRx = r;
+  const eRy = r * TILT * 0.48;
+
+  const tiltMag = Math.hypot(tiltX, tiltY);
+  // Rotation angle on the disc's plane — derived from tilt direction
+  const tiltAng = tiltMag > 0.02 ? Math.atan2(tiltY * TILT, tiltX) : 0;
+
+  // Shadow on floor
+  const [sx, sy] = proj(wx, wy, 0);
+  X.beginPath(); X.ellipse(sx, sy, r * 0.65, r * 0.65 * TILT * 0.55, tiltAng, 0, Math.PI * 2);
+  X.fillStyle = 'rgba(0,0,0,0.1)'; X.fill();
+
+  X.globalAlpha = alpha;
+
+  // Side band — rotated bottom half connecting bottom and top ellipses
+  const STEPS = 24;
+  X.fillStyle = sideCol;
+  X.beginPath();
+  for (let i = 0; i <= STEPS; i++) {
+    const a = (i / STEPS) * Math.PI;
+    const lx = Math.cos(a) * eRx, ly = Math.sin(a) * eRy;
+    const x = bcx + lx * Math.cos(tiltAng) - ly * Math.sin(tiltAng);
+    const y = bcy + lx * Math.sin(tiltAng) + ly * Math.cos(tiltAng);
+    i === 0 ? X.moveTo(x, y) : X.lineTo(x, y);
+  }
+  for (let i = STEPS; i >= 0; i--) {
+    const a = (i / STEPS) * Math.PI;
+    const lx = Math.cos(a) * eRx, ly = Math.sin(a) * eRy;
+    const x = cx + lx * Math.cos(tiltAng) - ly * Math.sin(tiltAng);
+    const y = cy + lx * Math.sin(tiltAng) + ly * Math.cos(tiltAng);
+    X.lineTo(x, y);
+  }
+  X.closePath(); X.fill();
+  X.strokeStyle = 'rgba(255,255,255,0.06)'; X.lineWidth = 0.5; X.stroke();
+
+  // Top face — ellipse rotated on its plane
+  X.beginPath(); X.ellipse(cx, cy, eRx, eRy, tiltAng, 0, Math.PI * 2);
+  const grad = X.createRadialGradient(cx, cy, 0, cx, cy, eRx);
+  grad.addColorStop(0, topCol); grad.addColorStop(1, sideCol);
+  X.fillStyle = grad; X.fill();
+  X.strokeStyle = 'rgba(255,255,255,0.12)'; X.lineWidth = 1; X.stroke();
+
+  X.globalAlpha = 1;
+  return [cx, cy, eRy, bcy + eRy];
+}
+
+function drawRoundedSquare(cx, cy, size, sizeY, cornerR, tiltAng) {
+  // Draw a rounded rectangle rotated by tiltAng around (cx, cy)
+  const hw = size / 2, hh = sizeY / 2, cr = Math.min(cornerR, hw, hh);
+  const cos = Math.cos(tiltAng), sin = Math.sin(tiltAng);
+  function r(lx, ly) { return [cx + lx * cos - ly * sin, cy + lx * sin + ly * cos]; }
+  // 4 corners with arcs
+  const pts = [
+    { cx: hw - cr, cy: -hh + cr, sa: -Math.PI / 2, ea: 0 },
+    { cx: hw - cr, cy: hh - cr, sa: 0, ea: Math.PI / 2 },
+    { cx: -hw + cr, cy: hh - cr, sa: Math.PI / 2, ea: Math.PI },
+    { cx: -hw + cr, cy: -hh + cr, sa: Math.PI, ea: Math.PI * 1.5 },
+  ];
+  X.beginPath();
+  for (const p of pts) {
+    const SEGS = 6;
+    for (let i = 0; i <= SEGS; i++) {
+      const a = p.sa + (p.ea - p.sa) * (i / SEGS);
+      const [px, py] = r(p.cx + Math.cos(a) * cr, p.cy + Math.sin(a) * cr);
+      i === 0 && pts.indexOf(p) === 0 ? X.moveTo(px, py) : X.lineTo(px, py);
+    }
+  }
+  X.closePath();
+}
+
+function drawHand() {
+  const r = HAND_R * SC;
+  const [cx, cy] = proj(handX, handY, PZ);
+  const [bcx, bcy] = proj(handX, handY, PZ - 16);
+  const sz = r * 1.9; // perfect square — same width and height on screen
+  // Shadow on floor
+  const [sx, sy] = proj(handX, handY, 0);
+  X.beginPath(); X.ellipse(sx, sy, sz * 0.4, sz * 0.4 * TILT * 0.7, VIEW_ROT, 0, Math.PI * 2);
+  X.fillStyle = 'rgba(0,0,0,0.12)'; X.fill();
+
+  // Top face — square, slightly transparent
+  X.globalAlpha = 0.75;
+  const ps = PADDLE_STYLES[selectedPaddle];
+  drawRoundedSquare(cx, cy, sz, sz, 0, VIEW_ROT);
+  const grad = X.createRadialGradient(cx - sz * 0.15, cy - sz * 0.15, 0, cx, cy, sz * 0.8);
+  grad.addColorStop(0, ps.top); grad.addColorStop(1, ps.bot);
+  X.fillStyle = grad; X.fill();
+  X.strokeStyle = ps.glow; X.lineWidth = 1.5; X.stroke();
+
+  // Pixel art overlay
+  if (pixelArt && pixelArtCanvas) {
+    X.save();
+    X.translate(cx, cy); X.rotate(VIEW_ROT);
+    X.imageSmoothingEnabled = false;
+    X.drawImage(pixelArtCanvas, -sz / 2, -sz / 2, sz, sz);
+    X.imageSmoothingEnabled = true;
+    X.restore();
+  }
+
+  X.globalAlpha = 1;
+
+  // Hit count — big, centered on paddle
+  X.font = `900 ${Math.max(16, SC * 18)}px Orbitron,sans-serif`;
+  X.textAlign = 'center'; X.textBaseline = 'middle';
+  X.fillStyle = 'rgba(255,255,255,0.85)';
+  X.fillText(score, cx, cy);
+
+  // Player name above paddle
+  X.font = `700 ${Math.max(10, SC * 9)}px Orbitron,sans-serif`;
+  X.textBaseline = 'bottom';
+  X.fillStyle = ps.glow; X.fillText(playerName || 'PLAYER', cx, cy - sz / 2 - 4 * SC);
+}
+
+function drawFrozenHand() {
+  const r = HAND_R * SC;
+  const [cx, cy] = proj(frozenHandX, frozenHandY, PZ);
+  const sz = r * 1.9;
+  const [sx, sy] = proj(frozenHandX, frozenHandY, 0);
+  X.beginPath(); X.ellipse(sx, sy, sz * 0.4, sz * 0.4 * TILT * 0.7, VIEW_ROT, 0, Math.PI * 2);
+  X.fillStyle = 'rgba(0,0,0,0.08)'; X.fill();
+  X.globalAlpha = 0.35;
+  const ps = PADDLE_STYLES[selectedPaddle];
+  drawRoundedSquare(cx, cy, sz, sz, 0, VIEW_ROT);
+  const grad = X.createRadialGradient(cx - sz * 0.15, cy - sz * 0.15, 0, cx, cy, sz * 0.8);
+  grad.addColorStop(0, ps.top); grad.addColorStop(1, ps.bot);
+  X.fillStyle = grad; X.fill();
+  X.strokeStyle = ps.glow; X.lineWidth = 1.5; X.stroke();
+  // Pixel art overlay (faded)
+  if (pixelArt && pixelArtCanvas) {
+    X.save();
+    X.translate(cx, cy); X.rotate(VIEW_ROT);
+    X.imageSmoothingEnabled = false;
+    X.drawImage(pixelArtCanvas, -sz / 2, -sz / 2, sz, sz);
+    X.imageSmoothingEnabled = true;
+    X.restore();
+  }
+  X.globalAlpha = 1;
+  X.font = `900 ${Math.max(16, SC * 18)}px Orbitron,sans-serif`;
+  X.textAlign = 'center'; X.textBaseline = 'middle';
+  X.fillStyle = 'rgba(255,255,255,0.4)';
+  X.fillText(score, cx, cy);
+  X.font = `700 ${Math.max(10, SC * 9)}px Orbitron,sans-serif`;
+  X.textBaseline = 'bottom';
+  X.fillStyle = `rgba(255,100,100,0.5)`; X.fillText(playerName || 'PLAYER', cx, cy - sz / 2 - 4 * SC);
+}
+
+function drawDummies() {
+  for (const d of dummies) {
+    const r = HAND_R * SC;
+    const sz = r * 1.9;
+    const [cx, cy] = proj(d.x, d.y, PZ);
+
+    // Shadow
+    const [sx, sy] = proj(d.x, d.y, 0);
+    X.beginPath(); X.ellipse(sx, sy, sz * 0.35, sz * 0.35 * TILT * 0.6, VIEW_ROT, 0, Math.PI * 2);
+    X.fillStyle = 'rgba(0,0,0,0.08)'; X.fill();
+
+    // Square paddle — faded if dead
+    X.globalAlpha = d.dead ? 0.15 : 0.35;
+    drawRoundedSquare(cx, cy, sz, sz, 0, VIEW_ROT);
+    const n = parseInt(d.col.slice(1), 16);
+    const cr = n >> 16 & 255, cg = n >> 8 & 255, cb = n & 255;
+    const grad = X.createRadialGradient(cx - sz * 0.15, cy - sz * 0.15, 0, cx, cy, sz * 0.8);
+    grad.addColorStop(0, `rgb(${cr},${cg},${cb})`);
+    grad.addColorStop(1, `rgb(${cr * 0.6 | 0},${cg * 0.6 | 0},${cb * 0.6 | 0})`);
+    X.fillStyle = grad; X.fill();
+    X.strokeStyle = `rgba(${cr},${cg},${cb},0.3)`; X.lineWidth = 1.5; X.stroke();
+    X.globalAlpha = 1;
+
+    // Hit count centered big
+    X.font = `900 ${Math.max(14, SC * 16)}px Orbitron,sans-serif`;
+    X.textAlign = 'center'; X.textBaseline = 'middle';
+    X.fillStyle = d.dead ? 'rgba(255,100,100,0.3)' : 'rgba(255,255,255,0.4)';
+    X.fillText(d.hits, cx, cy);
+
+    // Name above
+    X.font = `700 ${Math.max(9, SC * 7)}px Orbitron,sans-serif`;
+    X.textBaseline = 'bottom';
+    X.fillStyle = d.dead ? 'rgba(255,100,100,0.3)' : `rgba(${cr},${cg},${cb},0.4)`;
+    X.fillText(d.name, cx, cy - sz / 2 - 4 * SC);
+
+  }
+}
+
+function spawnCombatText(name, col) {
+  combatTexts.push({ text: `${name} ELIMINATED`, col, y: 0, life: 3 });
+}
+
+function drawCombatTexts(dt) {
+  for (let i = combatTexts.length - 1; i >= 0; i--) {
+    const ct = combatTexts[i];
+    ct.y += 40 * dt;
+    ct.life -= dt;
+    if (ct.life <= 0) { combatTexts.splice(i, 1); continue; }
+    const alpha = Math.min(1, ct.life);
+    const yPos = H / 2 - 140 - ct.y;
+    X.font = '700 16px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
+    X.fillStyle = ct.col.replace(')', `,${alpha})`).replace('rgb', 'rgba');
+    // Handle hex colors
+    if (ct.col.startsWith('#')) {
+      const n = parseInt(ct.col.slice(1), 16);
+      const r = n >> 16 & 255, g = n >> 8 & 255, b = n & 255;
+      X.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+    }
+    X.fillText(ct.text, W / 2, yPos);
+  }
+}
+
+function drawDebugLines() {
+  X.save();
+  X.setLineDash([6, 4]);
+  for (const d of dummies) {
+    if (d.dead) continue;
+    const b = d.ball;
+    if (b.held) continue;
+    const [px, py] = proj(d.x, d.y, PZ);
+    const [bx, by] = proj(b.x, b.y, b.z);
+    X.beginPath(); X.moveTo(px, py); X.lineTo(bx, by);
+    X.strokeStyle = d.col; X.lineWidth = 2; X.stroke();
+  }
+  // Player ball
+  if (!spectating && !ball.held && started) {
+    const [px, py] = proj(handX, handY, PZ);
+    const [bx, by] = proj(ball.x, ball.y, ball.z);
+    X.beginPath(); X.moveTo(px, py); X.lineTo(bx, by);
+    X.strokeStyle = '#0fa'; X.lineWidth = 2; X.stroke();
+  }
+  X.restore();
+}
+
+function drawParticlesR() {
+  for (const p of particles) {
+    const r = p.r * SC * 0.4 * p.life; if (r < 0.3) continue;
+    const [sx, sy] = proj(p.x, p.y, PZ * 0.5);
+    X.beginPath(); X.arc(sx, sy, r, 0, Math.PI * 2);
+    X.fillStyle = hexRgba(p.col, p.life * 0.7); X.fill();
+  }
+}
+
+function drawHUD() {
+  X.textAlign = 'left'; X.textBaseline = 'top';
+  X.font = '900 28px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.75)';
+  X.fillText(`HITS  ${score}`, 24, 20);
+  if (combo > 1) {
+    X.font = '700 16px Orbitron,sans-serif';
+    X.fillStyle = `rgba(0,255,170,${0.5 + Math.sin(Date.now() * 0.008) * 0.3})`;
+    X.fillText(`COMBO x${combo}`, 24, 56);
+  }
+  X.font = '400 12px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.3)';
+  X.fillText(`SPEED ${(speedMult * 100).toFixed(0)}%`, 24, 80);
+}
+
+function drawStart() {
+  X.fillStyle = 'rgba(4,4,12,0.7)'; X.fillRect(0, 0, W, H);
+  X.textAlign = 'center'; X.textBaseline = 'middle';
+  X.font = '400 52px Audiowide,sans-serif'; X.shadowColor = '#0fa'; X.shadowBlur = 30;
+  X.fillStyle = '#fff'; X.fillText('PongArena.net', W / 2, H / 2 - 100); X.shadowBlur = 0;
+
+  // Name entry
+  X.font = '400 12px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.5)';
+  X.fillText('ENTER YOUR NAME', W / 2, H / 2 - 48);
+  X.font = '700 24px Orbitron,sans-serif'; X.fillStyle = '#0fa';
+  const blink = Math.sin(Date.now() * 0.006) > 0 ? '_' : '';
+  X.fillText((playerName || '') + blink, W / 2, H / 2 - 18);
+
+  // Instructions
+  X.font = '400 12px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.4)';
+  X.fillText('Move mouse to control your hand — catch the ball at 100% height', W / 2, H / 2 + 16);
+
+  // Two buttons: START and WATCH AS GUEST
+  const btnW = 200, btnH = 44, gap = 20;
+  const startBtnX = W / 2 - btnW - gap / 2, btnY = H / 2 + 45;
+  const watchBtnX = W / 2 + gap / 2;
+  const p = 0.5 + Math.sin(Date.now() * 0.004) * 0.5;
+
+  // START button (dimmed if no name yet)
+  const canStart = playerName.length > 0;
+  const sHover = canStart && mouseX >= startBtnX && mouseX <= startBtnX + btnW && mouseY >= btnY && mouseY <= btnY + btnH;
+  X.fillStyle = sHover ? 'rgba(0,255,170,0.15)' : 'rgba(0,255,170,0.06)';
+  X.strokeStyle = canStart ? `rgba(0,255,170,${sHover ? 0.7 : 0.3})` : 'rgba(255,255,255,0.1)'; X.lineWidth = 1.5;
+  X.beginPath(); X.roundRect(startBtnX, btnY, btnW, btnH, 8); X.fill(); X.stroke();
+  X.font = '700 15px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
+  X.fillStyle = canStart ? `rgba(0,255,170,${0.5 + p * 0.5})` : 'rgba(255,255,255,0.15)';
+  X.fillText('START', startBtnX + btnW / 2, btnY + btnH / 2);
+
+  // WATCH AS GUEST button
+  const wHover = mouseX >= watchBtnX && mouseX <= watchBtnX + btnW && mouseY >= btnY && mouseY <= btnY + btnH;
+  X.fillStyle = wHover ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.04)';
+  X.strokeStyle = `rgba(255,255,255,${wHover ? 0.5 : 0.2})`; X.lineWidth = 1.5;
+  X.beginPath(); X.roundRect(watchBtnX, btnY, btnW, btnH, 8); X.fill(); X.stroke();
+  X.font = '700 13px Orbitron,sans-serif';
+  X.fillStyle = `rgba(255,255,255,${0.35 + p * 0.25})`;
+  X.fillText('WATCH AS GUEST', watchBtnX + btnW / 2, btnY + btnH / 2);
+
+  // Cursor
+  const cx = mouseX, cy = mouseY, cs = 12;
+  X.strokeStyle = '#0fa'; X.lineWidth = 2; X.lineCap = 'round';
+  X.beginPath(); X.moveTo(cx - cs, cy); X.lineTo(cx + cs, cy); X.stroke();
+  X.beginPath(); X.moveTo(cx, cy - cs); X.lineTo(cx, cy + cs); X.stroke();
+  X.beginPath(); X.arc(cx, cy, cs * 0.55, 0, Math.PI * 2);
+  X.strokeStyle = 'rgba(0,255,170,0.5)'; X.lineWidth = 1.5; X.stroke();
+}
+
+function getLiveLeaderboard() {
+  // Merge player + AI scores into a live leaderboard
+  const entries = [];
+  // Current player (if playing or eliminated — stays on board until round ends)
+  if (started && playerName && (gameOver || !spectating)) {
+    entries.push({ name: playerName, score, isPlayer: true, dead: gameOver });
+  }
+  // AI players
+  for (const d of dummies) {
+    entries.push({ name: d.name, score: d.hits, isAI: true, col: d.col, dead: d.dead });
+  }
+  entries.sort((a, b) => b.score - a.score);
+  return entries.slice(0, 10);
+}
+
+function drawLeaderboard() {
+  const panelW = 280, panelH = 320;
+  const px = W - panelW - 20, py = 20;
+  X.fillStyle = 'rgba(10,10,30,0.7)';
+  X.strokeStyle = 'rgba(0,255,170,0.3)'; X.lineWidth = 1;
+  X.beginPath(); X.roundRect(px, py, panelW, panelH, 8); X.fill(); X.stroke();
+  X.textAlign = 'center';
+  X.font = '700 14px Orbitron,sans-serif'; X.fillStyle = '#0fa';
+  X.fillText('LEADERBOARD', px + panelW / 2, py + 24);
+  X.font = '400 11px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.35)';
+  X.textAlign = 'left'; X.fillText('#', px + 16, py + 52);
+  X.fillText('NAME', px + 42, py + 52);
+  X.textAlign = 'right'; X.fillText('HITS', px + panelW - 16, py + 52);
+  const lb = getLiveLeaderboard();
+  for (let i = 0; i < 10; i++) {
+    const rowY = py + 74 + i * 24;
+    const entry = lb[i];
+    if (entry && entry.isPlayer) {
+      X.fillStyle = 'rgba(0,255,170,0.08)';
+      X.fillRect(px + 4, rowY - 10, panelW - 8, 22);
+    }
+    X.font = '700 12px Orbitron,sans-serif';
+    X.textAlign = 'left';
+    const col = entry ? (entry.isPlayer ? '#0fa' : entry.col || 'rgba(255,255,255,0.5)') : 'rgba(255,255,255,0.15)';
+    X.fillStyle = col;
+    X.fillText(`${i + 1}`, px + 16, rowY);
+    if (entry) {
+      X.save();
+      X.beginPath(); X.rect(px + 38, rowY - 12, panelW - 100, 22); X.clip();
+      X.fillText(entry.name, px + 42, rowY);
+      X.restore();
+      if (entry.dead) {
+        X.font = '700 8px Orbitron,sans-serif';
+        X.fillStyle = 'rgba(255,100,100,0.6)';
+        X.fillText('OUT', px + panelW - 52, rowY);
+      }
+      X.font = '700 12px Orbitron,sans-serif';
+      X.textAlign = 'right'; X.fillStyle = col;
+      X.fillText(entry.score, px + panelW - 16, rowY);
+    } else {
+      X.fillStyle = 'rgba(255,255,255,0.15)';
+      X.fillText('---', px + 42, rowY);
+      X.textAlign = 'right'; X.fillText('-', px + panelW - 16, rowY);
+    }
+  }
+}
+
+function drawStats() {
+  // Gather all players with stats, sorted by gold then played
+  const entries = Object.keys(allStats).map(n => ({ name: n, ...allStats[n] }));
+  entries.sort((a, b) => b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || b.played - a.played);
+  const maxRows = Math.min(entries.length, 11);
+  const rowH = 16, headerH = 42;
+  const panelW = 320, panelH = headerH + maxRows * rowH + 14;
+  const px = W - panelW - 20, py = 350;
+  X.fillStyle = 'rgba(10,10,30,0.7)';
+  X.strokeStyle = 'rgba(0,255,170,0.3)'; X.lineWidth = 1;
+  X.beginPath(); X.roundRect(px, py, panelW, panelH, 8); X.fill(); X.stroke();
+  X.textAlign = 'center'; X.font = '700 12px Orbitron,sans-serif'; X.fillStyle = '#0fa';
+  X.fillText('STATS', px + panelW / 2, py + 18);
+  // Column headers
+  const cols = [
+    { label: 'PLAYER', x: px + 14, align: 'left', w: 90 },
+    { label: 'GP', x: px + 120, align: 'center', w: 30 },
+    { label: 'G', x: px + 158, align: 'center', w: 24, col: '#ffd700' },
+    { label: 'S', x: px + 190, align: 'center', w: 24, col: '#c0c0c0' },
+    { label: 'B', x: px + 222, align: 'center', w: 24, col: '#cd7f32' },
+    { label: 'L', x: px + 254, align: 'center', w: 24, col: 'rgba(255,100,100,0.6)' },
+  ];
+  X.font = '700 8px Orbitron,sans-serif'; X.textBaseline = 'middle';
+  for (const c of cols) {
+    X.textAlign = c.align; X.fillStyle = c.col || 'rgba(255,255,255,0.4)';
+    X.fillText(c.label, c.x, py + 34);
+  }
+  // Divider
+  X.strokeStyle = 'rgba(255,255,255,0.08)'; X.lineWidth = 1;
+  X.beginPath(); X.moveTo(px + 10, py + headerH); X.lineTo(px + panelW - 10, py + headerH); X.stroke();
+  // Rows
+  for (let i = 0; i < maxRows; i++) {
+    const e = entries[i];
+    const ry = py + headerH + 6 + i * rowH;
+    const isPlayer = playerName && e.name === playerName;
+    if (isPlayer) {
+      X.fillStyle = 'rgba(0,255,170,0.06)';
+      X.fillRect(px + 4, ry - 7, panelW - 8, rowH);
+    }
+    X.font = '700 9px Orbitron,sans-serif'; X.textBaseline = 'middle';
+    X.textAlign = 'left'; X.fillStyle = isPlayer ? '#0fa' : 'rgba(255,255,255,0.55)';
+    X.fillText(e.name.length > 10 ? e.name.slice(0, 9) + '..' : e.name, cols[0].x, ry);
+    const vals = [e.played, e.gold, e.silver, e.bronze, e.losses];
+    for (let j = 0; j < vals.length; j++) {
+      X.textAlign = 'center'; X.fillStyle = cols[j + 1].col || 'rgba(255,255,255,0.5)';
+      X.fillText(vals[j], cols[j + 1].x, ry);
+    }
+  }
+  if (entries.length === 0) {
+    X.font = '400 9px Orbitron,sans-serif'; X.textAlign = 'center'; X.fillStyle = 'rgba(255,255,255,0.2)';
+    X.fillText('NO STATS YET — FINISH A ROUND', px + panelW / 2, py + headerH + 16);
+  }
+}
+
+function drawRoundTimer() {
+  if (!started || roundOver) return;
+  const remaining = Math.max(0, ROUND_DURATION - roundTimer);
+  const mins = Math.floor(remaining / 60);
+  const secs = Math.floor(remaining % 60);
+  const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+  X.font = '700 18px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'top';
+  X.fillStyle = remaining < 60 ? '#ff4466' : 'rgba(255,255,255,0.5)';
+  X.fillText(timeStr, W / 2, 14);
+}
+
+function drawRoundEnd() {
+  X.fillStyle = 'rgba(4,4,12,0.88)'; X.fillRect(0, 0, W, H);
+  X.textAlign = 'center'; X.textBaseline = 'middle';
+  X.font = '900 42px Orbitron,sans-serif'; X.shadowColor = '#ffd700'; X.shadowBlur = 30;
+  X.fillStyle = '#ffd700'; X.fillText('ROUND OVER', W / 2, H / 2 - 200); X.shadowBlur = 0;
+
+  const medals = ['#ffd700', '#c0c0c0', '#cd7f32'];
+  const labels = ['1ST', '2ND', '3RD'];
+  const lb = getLiveLeaderboard();
+
+  // Trophy podiums — 3 columns, center is tallest (1st), left is 2nd, right is 3rd
+  const podiumOrder = [1, 0, 2]; // left=2nd, center=1st, right=3rd
+  const podiumH = [140, 180, 110]; // heights for 2nd, 1st, 3rd
+  const podiumW = 120;
+  const podiumGap = 16;
+  const baseY = H / 2 + 80;
+  const totalW = podiumW * 3 + podiumGap * 2;
+  const startX = W / 2 - totalW / 2;
+
+  for (let col = 0; col < 3; col++) {
+    const rank = podiumOrder[col];
+    const ph = podiumH[col];
+    const px = startX + col * (podiumW + podiumGap);
+    const py = baseY - ph;
+
+    // Podium block
+    const podGrad = X.createLinearGradient(px, py, px, baseY);
+    podGrad.addColorStop(0, medals[rank]);
+    podGrad.addColorStop(0.3, medals[rank]);
+    podGrad.addColorStop(1, 'rgba(0,0,0,0.6)');
+    X.fillStyle = podGrad;
+    X.beginPath(); X.roundRect(px, py, podiumW, ph, [8, 8, 0, 0]); X.fill();
+    X.strokeStyle = medals[rank]; X.lineWidth = 2; X.stroke();
+
+    // Rank label on podium
+    X.font = '900 28px Orbitron,sans-serif'; X.fillStyle = 'rgba(0,0,0,0.4)';
+    X.fillText(labels[rank], px + podiumW / 2, py + ph / 2 + 10);
+
+    const entry = lb[rank];
+    if (entry) {
+      // Player name above podium
+      X.font = '700 16px Orbitron,sans-serif'; X.fillStyle = entry.col || '#fff';
+      X.fillText(entry.name, px + podiumW / 2, py - 30);
+      // Score
+      X.font = '700 13px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.7)';
+      X.fillText(`${entry.score} HITS`, px + podiumW / 2, py - 12);
+      // Medal emoji via rank label
+      X.font = '900 20px Orbitron,sans-serif'; X.fillStyle = medals[rank];
+      X.fillText(labels[rank], px + podiumW / 2, py + 24);
+    }
+  }
+
+  // "Click to restart" prompt
+  const p = 0.5 + Math.sin(Date.now() * 0.004) * 0.5;
+  X.font = '700 14px Orbitron,sans-serif'; X.fillStyle = `rgba(0,255,170,${0.3 + p * 0.5})`;
+  X.fillText('CLICK TO START NEW ROUND', W / 2, baseY + 30);
+
+  // ── Ad placeholder ─────────────────────────────────────────
+  const adSz = 160;
+  const adX = W - adSz - 30, adY = H / 2 - adSz / 2;
+  X.fillStyle = 'rgba(30,30,50,0.8)';
+  X.strokeStyle = 'rgba(255,255,255,0.15)'; X.lineWidth = 1;
+  X.beginPath(); X.roundRect(adX, adY, adSz, adSz, 6); X.fill(); X.stroke();
+  X.font = '700 10px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.2)';
+  X.fillText('AD', adX + adSz / 2, adY + adSz / 2 - 8);
+  X.font = '400 8px Orbitron,sans-serif'; X.fillStyle = 'rgba(255,255,255,0.12)';
+  X.fillText('YOUR AD HERE', adX + adSz / 2, adY + adSz / 2 + 8);
+}
+
+function drawGameOver() {
+  // Persistent flashing banner at bottom center
+  const pulse = 0.6 + Math.sin(Date.now() * 0.005) * 0.4;
+  X.fillStyle = 'rgba(4,4,12,0.7)';
+  X.beginPath(); X.roundRect(W / 2 - 180, H - 110, 360, 90, 10); X.fill();
+  X.strokeStyle = `rgba(255,68,102,${0.3 + pulse * 0.3})`; X.lineWidth = 1.5; X.stroke();
+  X.textAlign = 'center'; X.textBaseline = 'middle';
+  X.font = '900 24px Orbitron,sans-serif';
+  X.fillStyle = `rgba(255,68,102,${0.5 + pulse * 0.5})`;
+  X.fillText('GAME OVER', W / 2, H - 80);
+  X.font = '700 16px Orbitron,sans-serif';
+  X.fillStyle = `rgba(255,255,255,${0.5 + pulse * 0.5})`;
+  X.fillText(`${score}  HITS`, W / 2, H - 50);
+}
+
+function drawPaused() {
+  X.fillStyle = 'rgba(4,4,12,0.82)'; X.fillRect(0, 0, W, H);
+
+  // PAUSED title centered
+  X.textAlign = 'center'; X.textBaseline = 'middle';
+  X.font = '900 42px Orbitron,sans-serif'; X.shadowColor = '#0fa'; X.shadowBlur = 25;
+  X.fillStyle = '#fff'; X.fillText('PAUSED', W / 2, H / 2 - 30); X.shadowBlur = 0;
+
+  const p = 0.5 + Math.sin(Date.now() * 0.004) * 0.5;
+  X.font = '400 12px Orbitron,sans-serif';
+  X.fillStyle = `rgba(255,255,255,${0.25 + p * 0.25})`;
+  X.fillText('PRESS ESC TO RESUME', W / 2, H / 2 + 20);
+
+  drawLeaderboard();
+  drawStats();
+
+  // ── Customization panels ──────────────────────────────────
+  const g = pauseGridLayout();
+
+  // Ball editor panel background
+  X.fillStyle = 'rgba(10,10,30,0.7)';
+  X.strokeStyle = 'rgba(0,255,170,0.3)'; X.lineWidth = 1;
+  X.beginPath(); X.roundRect(g.bpx, g.bpy, g.ballPanelW, g.ballPanelH, 8); X.fill(); X.stroke();
+  X.textAlign = 'center'; X.font = '700 12px Orbitron,sans-serif'; X.fillStyle = '#0fa';
+  X.fillText('BALL COLOR', g.bpx + g.ballPanelW / 2, g.bpy + 22);
+
+  // Ball color row (circles)
+  for (let i = 0; i < BALL_COLORS.length; i++) {
+    const cx2 = g.bcOX + i * (g.bcSz + g.bcGap) + g.bcSz / 2;
+    const cy2 = g.bcOY + g.bcSz / 2;
+    const stops = BALL_COLORS[i].stops;
+    const bg = X.createRadialGradient(cx2 - g.bcSz * 0.15, cy2 - g.bcSz * 0.15, 0, cx2, cy2, g.bcSz / 2);
+    bg.addColorStop(0, stops[0]); bg.addColorStop(0.5, stops[1]); bg.addColorStop(1, stops[3]);
+    X.beginPath(); X.arc(cx2, cy2, g.bcSz / 2, 0, Math.PI * 2);
+    X.fillStyle = bg; X.fill();
+    if (i === selectedBallColor) {
+      X.strokeStyle = '#0fa'; X.lineWidth = 2.5;
+    } else {
+      X.strokeStyle = 'rgba(255,255,255,0.2)'; X.lineWidth = 1;
+    }
+    X.stroke();
+  }
+
+  // ── Tab buttons: PRESETS | EDITOR ──────────────────────────
+  const tabs = [['PRESETS','style'],['EDITOR','editor']];
+  for (let i = 0; i < 2; i++) {
+    const tx = i === 0 ? g.tab1X : g.tab2X;
+    const sel = pauseTab === tabs[i][1];
+    X.fillStyle = sel ? 'rgba(0,255,170,0.15)' : 'rgba(255,255,255,0.04)';
+    X.strokeStyle = sel ? '#0fa' : 'rgba(255,255,255,0.15)'; X.lineWidth = sel ? 2 : 1;
+    X.beginPath(); X.roundRect(tx, g.tabY, g.tabW, g.tabH, 5); X.fill(); X.stroke();
+    X.font = '700 9px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
+    X.fillStyle = sel ? '#0fa' : 'rgba(255,255,255,0.4)';
+    X.fillText(tabs[i][0], tx + g.tabW / 2, g.tabY + g.tabH / 2);
+  }
+
+  if (pauseTab === 'style') {
+    // Paddle preset panel
+    X.fillStyle = 'rgba(10,10,30,0.7)';
+    X.strokeStyle = 'rgba(0,255,170,0.3)'; X.lineWidth = 1;
+    X.beginPath(); X.roundRect(g.ppx, g.tabY + g.tabH + 8, g.paddlePanelW, g.paddlePanelH - 20, 8); X.fill(); X.stroke();
+    X.textAlign = 'center'; X.font = '700 11px Orbitron,sans-serif'; X.fillStyle = '#0fa';
+    X.fillText('PADDLE STYLE', g.ppx + g.paddlePanelW / 2, g.tabY + g.tabH + 24);
+
+    const presetStartY = g.tabY + g.tabH + 38;
+    for (let i = 0; i < 9; i++) {
+      const col = i % 3, row = Math.floor(i / 3);
+      const cx2 = g.pgox + col * (g.cellSz + g.gap), cy2 = presetStartY + row * (g.cellSz + g.gap);
+      const sel = i === selectedPaddle && !pixelArt;
+      X.fillStyle = sel ? 'rgba(0,255,170,0.15)' : 'rgba(255,255,255,0.05)';
+      X.strokeStyle = sel ? '#0fa' : 'rgba(255,255,255,0.15)'; X.lineWidth = sel ? 2 : 1;
+      X.beginPath(); X.roundRect(cx2, cy2, g.cellSz, g.cellSz, 6); X.fill(); X.stroke();
+      const psz = g.cellSz * 0.5, pcx = cx2 + g.cellSz / 2, pcy = cy2 + g.cellSz / 2 - 4;
+      const pst = PADDLE_STYLES[i];
+      const pg2 = X.createRadialGradient(pcx - psz * 0.15, pcy - psz * 0.15, 0, pcx, pcy, psz * 0.7);
+      pg2.addColorStop(0, pst.top); pg2.addColorStop(1, pst.bot);
+      X.beginPath(); X.roundRect(pcx - psz / 2, pcy - psz / 2, psz, psz, 4);
+      X.fillStyle = pg2; X.fill();
+      X.strokeStyle = pst.glow; X.lineWidth = 1.5; X.stroke();
+      X.font = '400 7px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'top';
+      X.fillStyle = sel ? '#0fa' : 'rgba(255,255,255,0.4)';
+      X.fillText(pst.name, pcx, pcy + psz / 2 + 5);
+    }
+  } else {
+    // ── Pixel Art Editor — contained panel ────────────────────
+    X.fillStyle = 'rgba(10,10,30,0.7)';
+    X.strokeStyle = 'rgba(0,255,170,0.3)'; X.lineWidth = 1;
+    X.beginPath(); X.roundRect(g.edPx, g.edPy, g.edPanelW, g.edPanelH, 8); X.fill(); X.stroke();
+    X.textAlign = 'center'; X.font = '700 11px Orbitron,sans-serif'; X.fillStyle = '#0fa';
+    X.fillText('PIXEL ART EDITOR', g.edPx + g.edPanelW / 2, g.edPy + 16);
+
+    // ── Left: Pixel Grid ─────────────────────────────────────
+    if (editorGrid) {
+      for (let y = 0; y < PIX_GRID; y++) for (let x = 0; x < PIX_GRID; x++) {
+        const px = g.edGx + x * g.edCellSz, py = g.edGy + y * g.edCellSz;
+        if (editorGrid[y][x]) {
+          X.fillStyle = editorGrid[y][x]; X.fillRect(px, py, g.edCellSz, g.edCellSz);
+        } else {
+          X.fillStyle = (x + y) % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.08)';
+          X.fillRect(px, py, g.edCellSz, g.edCellSz);
+        }
+      }
+      X.strokeStyle = 'rgba(255,255,255,0.08)'; X.lineWidth = 0.5;
+      for (let i = 0; i <= PIX_GRID; i++) {
+        X.beginPath(); X.moveTo(g.edGx + i * g.edCellSz, g.edGy); X.lineTo(g.edGx + i * g.edCellSz, g.edGy + g.edGridSz); X.stroke();
+        X.beginPath(); X.moveTo(g.edGx, g.edGy + i * g.edCellSz); X.lineTo(g.edGx + g.edGridSz, g.edGy + i * g.edCellSz); X.stroke();
+      }
+      const hx = Math.floor((mouseX - g.edGx) / g.edCellSz), hy = Math.floor((mouseY - g.edGy) / g.edCellSz);
+      if (hx >= 0 && hx < PIX_GRID && hy >= 0 && hy < PIX_GRID) {
+        X.strokeStyle = '#0fa'; X.lineWidth = 2;
+        X.strokeRect(g.edGx + hx * g.edCellSz, g.edGy + hy * g.edCellSz, g.edCellSz, g.edCellSz);
+      }
+    }
+    X.strokeStyle = 'rgba(0,255,170,0.4)'; X.lineWidth = 1.5;
+    X.strokeRect(g.edGx - 1, g.edGy - 1, g.edGridSz + 2, g.edGridSz + 2);
+
+    // ── Below grid: Tool row (horizontal) ────────────────────
+    const tools = [['PEN','pen'],['ERASE','eraser'],['FILL','fill']];
+    const tbw = 52;
+    for (let i = 0; i < tools.length; i++) {
+      const tx = g.edGx + i * (tbw + 4), ty = g.toolRowY;
+      const sel = editorTool === tools[i][1];
+      X.fillStyle = sel ? 'rgba(0,255,170,0.2)' : 'rgba(255,255,255,0.05)';
+      X.strokeStyle = sel ? '#0fa' : 'rgba(255,255,255,0.15)'; X.lineWidth = 1;
+      X.beginPath(); X.roundRect(tx, ty, tbw, 22, 4); X.fill(); X.stroke();
+      X.font = '700 8px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
+      X.fillStyle = sel ? '#0fa' : 'rgba(255,255,255,0.5)';
+      X.fillText(tools[i][0], tx + tbw / 2, ty + 11);
+    }
+    // Current color indicator next to tools
+    X.fillStyle = editorColor;
+    X.fillRect(g.edGx + 3 * (tbw + 4) + 4, g.toolRowY + 3, 16, 16);
+    X.strokeStyle = '#fff'; X.lineWidth = 1;
+    X.strokeRect(g.edGx + 3 * (tbw + 4) + 4, g.toolRowY + 3, 16, 16);
+
+    // ── Action row (horizontal: Upload | Clear | Apply) ──────
+    const abw = 56;
+    const actBtns = [
+      { label: 'UPLOAD', col: '#58b4ff', bg: 'rgba(80,180,255,0.08)', border: 'rgba(80,180,255,0.4)' },
+      { label: 'CLEAR', col: '#ff6666', bg: 'rgba(255,80,80,0.08)', border: 'rgba(255,80,80,0.3)' },
+      { label: 'APPLY', col: '#0fa', bg: `rgba(0,255,170,${0.08 + (0.5 + Math.sin(Date.now() * 0.005) * 0.5) * 0.1})`, border: '#0fa' },
+    ];
+    for (let i = 0; i < actBtns.length; i++) {
+      const ax = g.edGx + i * (abw + 4), ay = g.actRowY;
+      const b = actBtns[i];
+      X.fillStyle = b.bg; X.strokeStyle = b.border; X.lineWidth = i === 2 ? 1.5 : 1;
+      X.beginPath(); X.roundRect(ax, ay, abw, 24, 4); X.fill(); X.stroke();
+      X.font = i === 2 ? '900 8px Orbitron,sans-serif' : '700 7px Orbitron,sans-serif';
+      X.textAlign = 'center'; X.textBaseline = 'middle';
+      X.fillStyle = b.col; X.fillText(b.label, ax + abw / 2, ay + 12);
+    }
+    // Upload hint
+    X.font = '400 6px Orbitron,sans-serif'; X.textAlign = 'left'; X.textBaseline = 'top';
+    X.fillStyle = 'rgba(255,255,255,0.25)';
+    X.fillText('UPLOAD: 16x16px RECOMMENDED — ANY IMAGE AUTO-SCALES', g.edGx, g.actRowY + 27);
+
+    // ── Save Slots ───────────────────────────────────────────
+    const maxSlots = paidAccount ? 10 : 3;
+    X.font = '400 7px Orbitron,sans-serif'; X.textAlign = 'left'; X.textBaseline = 'bottom';
+    X.fillStyle = 'rgba(255,255,255,0.35)';
+    X.fillText(selectedSlot >= 0 ? `SLOT #${selectedSlot+1} SELECTED` : 'SLOTS', g.edGx, g.slotY - 3);
+
+    for (let i = 0; i < maxSlots; i++) {
+      const sx = g.edGx + i * (g.slotW + g.slotGap), sy = g.slotY;
+      const hasData = !!pixelArtSlots[i];
+      const isSel = selectedSlot === i;
+      X.fillStyle = isSel ? 'rgba(255,180,0,0.2)' : hasData ? 'rgba(0,255,170,0.08)' : 'rgba(255,255,255,0.04)';
+      X.strokeStyle = isSel ? '#ffb400' : hasData ? 'rgba(0,255,170,0.3)' : 'rgba(255,255,255,0.1)';
+      X.lineWidth = isSel ? 2 : 1;
+      X.beginPath(); X.roundRect(sx, sy, g.slotW, g.slotH, 4); X.fill(); X.stroke();
+      if (hasData && pixelArtSlots[i].thumb) {
+        X.imageSmoothingEnabled = false;
+        X.drawImage(pixelArtSlots[i].thumb, sx + 2, sy + 2, g.slotW - 4, g.slotH - 4);
+        X.imageSmoothingEnabled = true;
+        // X delete button
+        X.fillStyle = 'rgba(0,0,0,0.6)';
+        X.fillRect(sx + g.slotW - 12, sy, 12, 12);
+        X.font = '700 9px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
+        X.fillStyle = '#ff6666'; X.fillText('x', sx + g.slotW - 6, sy + 6);
+      } else {
+        X.font = '700 10px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
+        X.fillStyle = isSel ? '#ffb400' : 'rgba(255,255,255,0.25)';
+        X.fillText(`${i+1}`, sx + g.slotW / 2, sy + g.slotH / 2);
+      }
+    }
+    if (!paidAccount) {
+      const upY = g.slotY + g.slotH + 6;
+      X.fillStyle = 'rgba(255,210,0,0.06)'; X.strokeStyle = 'rgba(255,210,0,0.25)'; X.lineWidth = 1;
+      X.beginPath(); X.roundRect(g.edGx, upY, 140, 22, 4); X.fill(); X.stroke();
+      X.font = '700 7px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
+      X.fillStyle = '#ffd700'; X.fillText('UPGRADE $5 — 10 SLOTS', g.edGx + 70, upY + 11);
+    }
+
+    // ── Right column: Palette ────────────────────────────────
+    for (let i = 0; i < EDITOR_PALETTE.length; i++) {
+      const col = i % g.palCols, row = Math.floor(i / g.palCols);
+      const px = g.palX + col * (g.palSz + g.palGap), py = g.palY + row * (g.palSz + g.palGap);
+      X.fillStyle = EDITOR_PALETTE[i]; X.fillRect(px, py, g.palSz, g.palSz);
+      if (EDITOR_PALETTE[i] === editorColor) {
+        X.strokeStyle = '#fff'; X.lineWidth = 2; X.strokeRect(px - 1, py - 1, g.palSz + 2, g.palSz + 2);
+      }
+    }
+
+    // ── HSL Color Picker ─────────────────────────────────────
+    for (let px = 0; px < g.cpW; px += 2) {
+      for (let py = 0; py < g.cpH; py += 2) {
+        X.fillStyle = hslToHex((px / g.cpW) * 360, 1 - py / g.cpH, pickerL);
+        X.fillRect(g.cpX + px, g.cpY + py, 2, 2);
+      }
+    }
+    X.strokeStyle = 'rgba(255,255,255,0.3)'; X.lineWidth = 1;
+    X.strokeRect(g.cpX, g.cpY, g.cpW, g.cpH);
+    const chX = g.cpX + (pickerH / 360) * g.cpW, chY2 = g.cpY + (1 - pickerS) * g.cpH;
+    X.strokeStyle = '#fff'; X.lineWidth = 2;
+    X.beginPath(); X.arc(chX, chY2, 4, 0, Math.PI * 2); X.stroke();
+    X.strokeStyle = '#000'; X.lineWidth = 1;
+    X.beginPath(); X.arc(chX, chY2, 3, 0, Math.PI * 2); X.stroke();
+
+    // Lightness slider
+    for (let py = 0; py < g.cpSlH; py += 2) {
+      X.fillStyle = hslToHex(pickerH, pickerS, 1 - py / g.cpSlH);
+      X.fillRect(g.cpSlX, g.cpSlY + py, g.cpSlW, 2);
+    }
+    X.strokeStyle = 'rgba(255,255,255,0.3)'; X.lineWidth = 1;
+    X.strokeRect(g.cpSlX, g.cpSlY, g.cpSlW, g.cpSlH);
+    const lY = g.cpSlY + (1 - pickerL) * g.cpSlH;
+    X.fillStyle = '#fff';
+    X.beginPath(); X.moveTo(g.cpSlX - 3, lY - 3); X.lineTo(g.cpSlX, lY); X.lineTo(g.cpSlX - 3, lY + 3); X.fill();
+    X.beginPath(); X.moveTo(g.cpSlX + g.cpSlW + 3, lY - 3); X.lineTo(g.cpSlX + g.cpSlW, lY); X.lineTo(g.cpSlX + g.cpSlW + 3, lY + 3); X.fill();
+
+    // Color preview + add swatch
+    X.fillStyle = editorColor;
+    X.fillRect(g.cpX, g.cpPrevY, g.cpPrevSz, g.cpPrevSz);
+    X.strokeStyle = '#fff'; X.lineWidth = 1;
+    X.strokeRect(g.cpX, g.cpPrevY, g.cpPrevSz, g.cpPrevSz);
+    const addBtnX = g.cpX + g.cpPrevSz + 4;
+    X.fillStyle = 'rgba(0,255,170,0.1)'; X.strokeStyle = 'rgba(0,255,170,0.4)'; X.lineWidth = 1;
+    X.beginPath(); X.roundRect(addBtnX, g.cpPrevY, 36, g.cpPrevSz, 3); X.fill(); X.stroke();
+    X.font = '700 7px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
+    X.fillStyle = '#0fa'; X.fillText('+ADD', addBtnX + 18, g.cpPrevY + g.cpPrevSz / 2);
+
+    // ── Custom Swatches ──────────────────────────────────────
+    if (customSwatches.length > 0) {
+      X.font = '400 6px Orbitron,sans-serif'; X.textAlign = 'left'; X.textBaseline = 'bottom';
+      X.fillStyle = 'rgba(255,255,255,0.3)'; X.fillText('SWATCHES', g.swX, g.swY - 2);
+      for (let i = 0; i < customSwatches.length; i++) {
+        const col = i % g.swCols2, row = Math.floor(i / g.swCols2);
+        const sx = g.swX + col * (g.swSz + g.swGap), sy = g.swY + row * (g.swSz + g.swGap);
+        X.fillStyle = customSwatches[i]; X.fillRect(sx, sy, g.swSz, g.swSz);
+        if (customSwatches[i] === editorColor) {
+          X.strokeStyle = '#fff'; X.lineWidth = 1.5; X.strokeRect(sx - 1, sy - 1, g.swSz + 2, g.swSz + 2);
+        }
+      }
+      const swRows = Math.ceil(customSwatches.length / g.swCols2);
+      const clearSwY = g.swY + swRows * (g.swSz + g.swGap) + 2;
+      X.fillStyle = 'rgba(255,80,80,0.06)'; X.strokeStyle = 'rgba(255,80,80,0.2)'; X.lineWidth = 1;
+      X.beginPath(); X.roundRect(g.swX, clearSwY, 60, 16, 3); X.fill(); X.stroke();
+      X.font = '400 6px Orbitron,sans-serif'; X.textAlign = 'center'; X.textBaseline = 'middle';
+      X.fillStyle = 'rgba(255,100,100,0.6)'; X.fillText('CLEAR', g.swX + 30, clearSwY + 8);
+    }
+  }
+
+  // Custom cursor
+  const cx = mouseX, cy = mouseY, cs = 12;
+  X.strokeStyle = '#0fa'; X.lineWidth = 2; X.lineCap = 'round';
+  X.beginPath(); X.moveTo(cx - cs, cy); X.lineTo(cx + cs, cy); X.stroke();
+  X.beginPath(); X.moveTo(cx, cy - cs); X.lineTo(cx, cy + cs); X.stroke();
+  X.beginPath(); X.arc(cx, cy, cs * 0.55, 0, Math.PI * 2);
+  X.strokeStyle = 'rgba(0,255,170,0.5)'; X.lineWidth = 1.5; X.stroke();
+}
+
+// ═════════════════════════════════════════════════════════════
+function resize() {
+  W = C.width = window.innerWidth; H = C.height = window.innerHeight;
+  SC = Math.min(W, H) / 600;
+}
+window.addEventListener('resize', resize);
+
+let last = 0;
+function loop(ts) {
+  const dt = Math.min((ts - last) / 1000, 0.05); last = ts; gDt = dt;
+  update(dt); render(); requestAnimationFrame(loop);
+}
+
+playerName = ''; resize(); init(); loadLeaderboard(); requestAnimationFrame(loop);
+</script>
+</body>
+</html>
