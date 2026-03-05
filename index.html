@@ -422,15 +422,18 @@ function init() {
   obstacles = [];
   for (let i = 0; i < 14; i++)
     obstacles.push({ x: rand(150, AW - 250), y: rand(150, AH - 250), w: rand(50, 130), h: rand(50, 130), ht: rand(50, 140) });
-  const aiNames = ['ALEX','SAM','JORDAN','RILEY','CASEY','MORGAN','TAYLOR','QUINN','AVERY','JAMIE'];
+  const aiNamePool = ['xKiller99','NoScope_','Pong_God','zzBounce','L1ghtning','DarkMatter','ez_clap','yolo420','TiltedTom','sk8rBoi','n00bSlayer','ArcAngel','BallZ','Wh1ffy','PaddlePro','ZeroChill','1TapKing','ShadowPng','GlitchMob','RektU'];
+  const aiNames = [];
+  const pool = [...aiNamePool];
+  for (let i = 0; i < 10; i++) { const idx = Math.floor(Math.random() * pool.length); aiNames.push(pool.splice(idx, 1)[0]); }
   const aiCols = ['#ff6b6b','#69db7c','#ffd43b','#cc5de8','#ff922b','#66d9ef','#f06595','#a9e34b','#da77f2','#ffa8a8'];
-  const aiSkills = [0.82, 0.98, 0.75, 0.93, 0.78, 0.96, 0.7, 0.9, 0.8, 0.95];
+  const aiSkills = [0.90, 0.99, 0.88, 0.97, 0.86, 0.98, 0.85, 0.95, 0.92, 0.96];
   dummies = [];
   for (let i = 0; i < 10; i++) {
     const sx = rand(200, AW - 200), sy = rand(200, AH - 200);
-    dummies.push({ name: aiNames[i], hits: 0, x: sx, y: sy, tx: sx, ty: sy, col: aiCols[i], t: 0, dropT: rand(0.3, 1.2), skill: aiSkills[i], vx: 0, vy: 0 });
+    dummies.push({ name: aiNames[i], hits: 0, x: sx, y: sy, tx: sx, ty: sy, col: aiCols[i], t: 0, dropT: rand(0.3, 0.8), skill: aiSkills[i] });
   }
-  for (const d of dummies) { d.ball = makeBall(d.x, d.y); d.dead = false; d.lives = 1; d.vx = 0; d.vy = 0; d.hits = 0; }
+  for (const d of dummies) { d.ball = makeBall(d.x, d.y); d.dead = false; d.lives = 3; d.vx = 0; d.vy = 0; d.hits = 0; }
   movers = [];
   const PSZ = 180, PAD = 40;
   function noOverlap(nx, ny) {
@@ -986,66 +989,64 @@ function update(dt) {
       d.dropT -= dt;
       if (d.dropT <= 0) {
         const a = rand(0, Math.PI * 2);
-        b.vx = Math.cos(a) * rand(150, 300); b.vy = Math.sin(a) * rand(150, 300);
+        b.vx = Math.cos(a) * rand(100, 200); b.vy = Math.sin(a) * rand(100, 200);
         b.vz = -rand(250, 350); b.held = false; b.canHit = false; b.hitThisArc = true;
         b.avx = rand(-3, 3); b.avy = rand(-3, 3);
       }
     } else {
-      // Physics-based paddle movement — predict where ball will be at paddle height
-      const accel = 4500 + d.skill * 6000; // 4500 (worst) to 10500 (best)
-      const maxSpd = 1400 + d.skill * 2200;  // 1400 (worst) to 3600 (best)
-      const friction = 2.5 - d.skill * 0.4; // 2.5 (worst) to 2.1 (best)
-      // Predict ball position at paddle height using full arc simulation
-      let targX = b.x, targY = b.y;
+      // Human-like paddle movement — blend between tracking ball and predicted landing
+      const maxSpeed = 400 + d.skill * 500; // 400-900 px/s
+      let landX = b.x, landY = b.y;
+      let urgency = 0; // 0 = ball high up, 1 = ball about to land
       if (!b.held) {
-        let sz = b.z, svz = b.vz;
-        let tPredict = 0;
-        // Simulate forward to find when ball reaches PZ height while descending
-        for (let step = 0; step < 120; step++) {
+        // Predict landing spot
+        let sx = b.x, sy = b.y, sz = b.z, svx = b.vx, svy = b.vy, svz = b.vz;
+        const sm = Math.min(1.5, 1 + roundTimer * 0.001);
+        for (let step = 0; step < 200; step++) {
           const sDt = 0.016;
-          svz += GRAV * sDt;
-          sz -= svz * sDt;
-          tPredict += sDt;
-          if (svz < 0 && sz >= PZ * 0.8) break; // descending near paddle height
-          if (sz <= 0) { // bounced — reverse
-            sz = 0; svz = -BOUNCE_VZ;
-          }
+          sx += svx * sm * sDt; sy += svy * sm * sDt;
+          svz -= GRAV * sDt; sz += svz * sDt;
+          if (sx < BALL_R) { sx = BALL_R; svx = Math.abs(svx); }
+          if (sx > AW - BALL_R) { sx = AW - BALL_R; svx = -Math.abs(svx); }
+          if (sy < BALL_R) { sy = BALL_R; svy = Math.abs(svy); }
+          if (sy > AH - BALL_R) { sy = AH - BALL_R; svy = -Math.abs(svy); }
+          if (svz < 0 && sz >= PZ * 0.7) { landX = sx; landY = sy; break; }
+          if (sz <= 0) { sz = 0; svz = BOUNCE_VZ; svx *= 0.95; svy *= 0.95; }
         }
-        const predict = tPredict * (0.7 + d.skill * 0.3);
-        targX = b.x + b.vx * predict;
-        targY = b.y + b.vy * predict;
-        targX = clamp(targX, BALL_R, AW - BALL_R);
-        targY = clamp(targY, BALL_R, AH - BALL_R);
+        landX = clamp(landX, BALL_R, AW - BALL_R);
+        landY = clamp(landY, BALL_R, AH - BALL_R);
+        // Urgency: how close ball is to paddle height (0=far, 1=imminent)
+        if (b.vz < 0) urgency = clamp(b.z / PZ, 0, 1); // rising — low urgency
+        else urgency = clamp(1 - b.z / PZ, 0, 1); // falling — urgency grows as z drops
       }
-      // Minimal jitter
-      d.jitterT = (d.jitterT || 0) + dt;
-      const jx = Math.sin(d.jitterT * 5 + d.skill * 5) * 2;
-      const jy = Math.cos(d.jitterT * 4 + d.skill * 3) * 2;
-      const dx = targX + jx - d.x, dy = targY + jy - d.y;
+      // Blend: when ball is high, lazily follow its shadow; as it descends, commit to landing spot
+      const blend = 0.3 + urgency * 0.7;
+      const targX = b.x + (landX - b.x) * blend;
+      const targY = b.y + (landY - b.y) * blend;
+      // Move at constant speed, faster when urgent
+      const speed = maxSpeed * (0.4 + urgency * 0.6);
+      const dx = targX - d.x, dy = targY - d.y;
       const dist = Math.hypot(dx, dy);
-      if (dist > 1) {
-        d.vx += (dx / dist) * accel * dt;
-        d.vy += (dy / dist) * accel * dt;
+      if (dist > 2) {
+        const step = Math.min(dist, speed * dt);
+        d.x += (dx / dist) * step;
+        d.y += (dy / dist) * step;
       }
-      // Friction
-      d.vx *= Math.max(0, 1 - friction * dt);
-      d.vy *= Math.max(0, 1 - friction * dt);
-      // Clamp speed
-      const spd = Math.hypot(d.vx, d.vy);
-      if (spd > maxSpd) { d.vx *= maxSpd / spd; d.vy *= maxSpd / spd; }
-      d.x += d.vx * dt; d.y += d.vy * dt;
       // Keep in bounds
       d.x = clamp(d.x, BALL_R, AW - BALL_R);
       d.y = clamp(d.y, BALL_R, AH - BALL_R);
 
-      if (updateBallPhysics(b, dt, 1) === 'bounce') {
-        // Ball hit the ground — if it wasn't hit this arc, that's a miss
+      if (updateBallPhysics(b, dt, Math.min(1.5, 1 + roundTimer * 0.001)) === 'bounce') {
         if (!b.hitThisArc) {
-          d.lives = (d.lives || 1) - 1;
-          if (d.lives <= 0) {
-            d.dead = true;
-            beep(90, 0.4, 'sawtooth', 0.06);
-            spawnCombatText(d.name, d.col);
+          if (b.portalGrace) {
+            b.portalGrace = false; // forgive one miss after portal teleport
+          } else {
+            d.lives = (d.lives || 1) - 1;
+            if (d.lives <= 0) {
+              d.dead = true;
+              beep(90, 0.4, 'sawtooth', 0.06);
+              spawnCombatText(d.name, d.col);
+            }
           }
         }
         b.hitThisArc = false;
@@ -1065,14 +1066,7 @@ function update(dt) {
             b.z = MZ + 1;
             b.vz = -Math.abs(b.vz);
             b.portalCd = 1.5;
-            // AI reacts to portal — boost toward ball's new position
-            const pdx = b.x - d.x, pdy = b.y - d.y;
-            const pdist = Math.hypot(pdx, pdy);
-            if (pdist > 1) {
-              const boost = maxSpd * (0.6 + d.skill * 0.4);
-              d.vx = (pdx / pdist) * boost;
-              d.vy = (pdy / pdist) * boost;
-            }
+            b.portalGrace = true; // forgive next miss after portal
             b.x = clamp(b.x, BALL_R, AW - BALL_R);
             b.y = clamp(b.y, BALL_R, AH - BALL_R);
             spawnP(b.x, b.y, '#f0f', 8);
@@ -1081,18 +1075,25 @@ function update(dt) {
           }
         }
       }
-      // Hit check — ball near paddle height, descending, paddle underneath
+      // Hit check — generous radius so AI rarely misses
       const hitDist = Math.hypot(b.x - d.x, b.y - d.y);
-      if (b.canHit && b.vz <= 0 && b.z >= PZ * 0.65 && hitDist < HAND_R * 1.5) {
+      if (b.canHit && b.vz <= 0 && b.z >= PZ * 0.4 && hitDist < HAND_R * 3.0) {
         b.canHit = false;
         b.hitThisArc = true;
-        d.lives = 1; // reset lives on successful hit
-        // Strong hit in a random direction — sends ball flying far across map
-        const a = rand(0, Math.PI * 2);
-        const hitPower = rand(280, 480);
+        // lives don't reset on hit — AI has fixed lives
+        // Skilled AI aims toward the player; weaker AI hits randomly
+        const timeRamp = Math.min(2.0, 1 + roundTimer * 0.002); // capped ramp
+        const hitPower = rand(350, 600) * timeRamp;
+        let a;
+        if (!gameOver && !spectating && Math.random() < d.skill * 0.7) {
+          // Aim toward player with some spread
+          a = Math.atan2(handY - d.y, handX - d.x) + rand(-0.3, 0.3);
+        } else {
+          a = rand(0, Math.PI * 2);
+        }
         b.vx = Math.cos(a) * hitPower;
         b.vy = Math.sin(a) * hitPower;
-        b.vz = -HIT_VZ; b.z = PZ;
+        b.vz = -HIT_VZ * 1.0 * timeRamp; b.z = PZ;
         b.avx += rand(-5, 5); b.avy += rand(-5, 5);
         d.hits++;
       }
@@ -1203,12 +1204,12 @@ function render() {
   X.clearRect(0, 0, W, H);
   X.fillStyle = '#0a0a15'; X.fillRect(0, 0, W, H);
   drawFloor(); drawObstacles(); drawMovers();
-  drawDummyBalls(); drawDummies();
+  drawDummyBalls(); drawDummies(); drawPortalCooldowns();
   if (!spectating) { drawBallShadow(); drawBall(); drawHand(); }
   if (gameOver) drawFrozenHand();
   drawParticlesR(); drawWalls(); drawDebugLines();
   if (!spectating) drawHUD();
-  if (started && tabHeld) drawLeaderboard();
+  if (started) drawLeaderboard();
   if (hitFlash > 0) { X.fillStyle = `rgba(255,255,255,${hitFlash * 0.08})`; X.fillRect(0, 0, W, H); }
   if (!started) drawStart();
   if (spectating) {
@@ -1230,6 +1231,12 @@ function render() {
   if (roundOver) drawRoundEnd();
   if (paused) drawPaused();
   drawCombatTexts(gDt);
+  // Tooltips
+  if (started && !paused) {
+    X.font = '400 10px Orbitron,sans-serif'; X.textAlign = 'left'; X.textBaseline = 'bottom';
+    X.fillStyle = 'rgba(255,255,255,0.15)';
+    X.fillText('ESC — Full UI  |  TAB — Leaderboard', 12, H - 12);
+  }
   // Server number
   X.font = '400 10px Orbitron,sans-serif'; X.textAlign = 'right'; X.textBaseline = 'bottom';
   X.fillStyle = 'rgba(255,255,255,0.15)';
@@ -1376,6 +1383,23 @@ function drawDummyBalls() {
     if (r < 1) continue;
     const [bx, by] = proj(b.x, b.y, b.z);
     drawSphere(bx, by, r, b, 1);
+  }
+}
+
+function drawPortalCooldowns() {
+  const allBalls = [];
+  if (ball && !ball.held) allBalls.push(ball);
+  for (const d of dummies) { if (!d.dead && !d.ball.held) allBalls.push(d.ball); }
+  for (const b of allBalls) {
+    if ((b.portalCd || 0) > 0) {
+      const [bx, by] = proj(b.x, b.y, b.z);
+      const t = b.portalCd;
+      const alpha = clamp(t / 0.5, 0, 1);
+      X.font = `900 ${Math.max(10, SC * 10)}px Orbitron,sans-serif`;
+      X.textAlign = 'center'; X.textBaseline = 'bottom';
+      X.fillStyle = `rgba(180,80,255,${alpha * 0.8})`;
+      X.fillText(t.toFixed(1) + 's', bx, by - 16 * SC);
+    }
   }
 }
 
@@ -1542,7 +1566,7 @@ function drawDummies() {
     X.fillStyle = 'rgba(0,0,0,0.08)'; X.fill();
 
     // Square paddle — faded if dead
-    X.globalAlpha = d.dead ? 0.15 : 0.35;
+    X.globalAlpha = d.dead ? 0.2 : 0.8;
     drawRoundedSquare(cx, cy, sz, sz, 0, VIEW_ROT);
     const n = parseInt(d.col.slice(1), 16);
     const cr = n >> 16 & 255, cg = n >> 8 & 255, cb = n & 255;
@@ -1569,6 +1593,12 @@ function drawDummies() {
       X.fillStyle = 'rgba(255,70,70,0.85)';
       X.textBaseline = 'top'; X.textAlign = 'center';
       X.fillText('ELIMINATED', cx, cy + sz / 2 + 4 * SC);
+    } else {
+      // Lives tooltip below paddle
+      X.font = `${Math.max(12, SC * 14)}px sans-serif`;
+      X.textBaseline = 'top'; X.textAlign = 'center';
+      X.fillStyle = 'rgba(255,255,255,0.7)';
+      X.fillText('♥'.repeat(d.lives), cx, cy + sz / 2 + 3 * SC);
     }
 
   }
